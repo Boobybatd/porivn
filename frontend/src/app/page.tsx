@@ -1531,8 +1531,8 @@ export default function HomePage() {
                   <VnindexChart data={bundle.vnindex_history} dark={darkMode} />
                 )}
 
-                <div className="mt-4 grid gap-3 sm:grid-cols-3">
-                  {[
+                {(() => {
+                  const pillars = [
                     {
                       id: 1,
                       title: "01 / XU HƯỚNG THỊ TRƯỜNG",
@@ -1557,77 +1557,110 @@ export default function HomePage() {
                       explainFormula: "Volume Pace = Khối lượng phiên / Trung bình 20 phiên (MA20 Vol)",
                       explainDetail: `Đo lường cường độ dòng tiền qua hệ số Volume Pace hiện tại (${regime.volume_pace.toFixed(2)}x so với bình quân 20 phiên). Thanh khoản duy trì từ 0.90x–1.35x đi kèm giá tăng xác nhận dòng tiền nâng đỡ bền vững; thanh khoản đột biến khi giá thủng hỗ trợ cảnh báo áp lực phân phối.`,
                     },
-                  ].map((p) => {
-                    const isOpen = openPillarInfo === p.id;
-                    return (
-                      <div
-                        key={p.id}
-                        className="salx-sub p-3 transition-all"
-                        style={{
-                          borderColor: isOpen ? "var(--g)" : "var(--bd-soft)",
-                          boxShadow: isOpen ? "0 8px 24px rgba(0, 210, 255, 0.12)" : "none",
-                        }}
-                      >
-                        <div className="flex items-center justify-between gap-2">
-                          <div style={{ fontFamily: MONO, fontSize: 9.5, fontWeight: 800, color: "var(--g)" }}>
-                            {p.title}
-                          </div>
-                          <button
-                            onClick={() => setOpenPillarInfo(isOpen ? null : p.id)}
-                            title="Ấn để xem giải thích công thức & ý nghĩa định lượng"
-                            style={{
-                              display: "inline-flex",
-                              alignItems: "center",
-                              gap: 3,
-                              fontFamily: MONO,
-                              fontSize: 9,
-                              fontWeight: 700,
-                              padding: "2px 7px",
-                              borderRadius: 99,
-                              border: `1px solid ${isOpen ? "var(--g)" : "var(--bd-mid)"}`,
-                              background: isOpen ? "var(--g)" : "var(--surf)",
-                              color: isOpen ? "var(--g-contrast)" : "var(--g)",
-                              cursor: "pointer",
-                            }}
-                          >
-                            <HelpCircle className="h-3 w-3" />
-                            {isOpen ? "ĐÓNG" : "GIẢI THÍCH"}
-                          </button>
-                        </div>
-                        <div style={{ marginTop: 6, fontSize: 12.5, fontWeight: 700, color: "var(--ink)" }}>
-                          {p.desc}
-                        </div>
-
-                        {isOpen && (
-                          <div
-                            className="mt-2.5 pt-2.5 text-xs space-y-1.5"
-                            style={{ borderTop: "1px dashed var(--bd-mid)" }}
-                          >
-                            <div style={{ fontFamily: MONO, fontSize: 10, fontWeight: 700, color: "var(--cyan)" }}>
-                              {p.explainTitle}
-                            </div>
+                  ];
+                  const activePillar = pillars.find((p) => p.id === openPillarInfo) || null;
+                  return (
+                    <>
+                      <div className="mt-4 grid gap-3 sm:grid-cols-3">
+                        {pillars.map((p) => {
+                          const isOpen = openPillarInfo === p.id;
+                          return (
                             <div
+                              key={p.id}
+                              className="salx-sub p-3 transition-all flex flex-col justify-between"
+                              style={{
+                                borderColor: isOpen ? "var(--g)" : "var(--bd-soft)",
+                                boxShadow: isOpen ? "0 8px 24px rgba(0, 210, 255, 0.14)" : "none",
+                              }}
+                            >
+                              <div className="flex items-center justify-between gap-2">
+                                <div style={{ fontFamily: MONO, fontSize: 9.5, fontWeight: 800, color: "var(--g)" }}>
+                                  {p.title}
+                                </div>
+                                <button
+                                  type="button"
+                                  onClick={() => setOpenPillarInfo(isOpen ? null : p.id)}
+                                  title="Ấn để xem giải thích công thức & ý nghĩa định lượng"
+                                  style={{
+                                    display: "inline-flex",
+                                    alignItems: "center",
+                                    gap: 4,
+                                    fontFamily: MONO,
+                                    fontSize: 9,
+                                    fontWeight: 800,
+                                    padding: "3px 8px",
+                                    borderRadius: 99,
+                                    border: `1px solid ${isOpen ? "var(--g)" : "var(--gd)"}`,
+                                    background: isOpen ? "var(--g)" : "var(--gb)",
+                                    color: isOpen ? "var(--g-contrast)" : "var(--g)",
+                                    cursor: "pointer",
+                                    flexShrink: 0,
+                                  }}
+                                >
+                                  <HelpCircle className="h-3 w-3" />
+                                  {isOpen ? "ĐÓNG" : "GIẢI THÍCH"}
+                                </button>
+                              </div>
+                              <div style={{ marginTop: 6, fontSize: 12.5, fontWeight: 700, color: "var(--ink)" }}>
+                                {p.desc}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+
+                      {activePillar && (
+                        <div
+                          className="salx-sub mt-3 p-3.5 text-xs space-y-2 salx-fade-up"
+                          style={{
+                            borderColor: "var(--g)",
+                            background: "var(--surf)",
+                            boxShadow: "0 10px 28px rgba(0, 210, 255, 0.12)",
+                          }}
+                        >
+                          <div className="flex items-center justify-between gap-2">
+                            <div style={{ fontFamily: MONO, fontSize: 10.5, fontWeight: 800, color: "var(--g)" }}>
+                              {activePillar.title} — {activePillar.explainTitle}
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => setOpenPillarInfo(null)}
                               style={{
                                 fontFamily: MONO,
                                 fontSize: 9.5,
-                                padding: "4px 7px",
-                                borderRadius: 5,
-                                background: "var(--surf)",
-                                border: "1px solid var(--bd-soft)",
-                                color: "var(--ink)",
+                                fontWeight: 700,
+                                padding: "2px 8px",
+                                borderRadius: 6,
+                                border: "1px solid var(--bd-mid)",
+                                background: "var(--surf2)",
+                                color: "var(--mut)",
+                                cursor: "pointer",
                               }}
                             >
-                              Công thức: {p.explainFormula}
-                            </div>
-                            <p style={{ margin: 0, fontSize: 11.5, color: "var(--mut)", lineHeight: 1.5 }}>
-                              {p.explainDetail}
-                            </p>
+                              THU GỌN ✕
+                            </button>
                           </div>
-                        )}
-                      </div>
-                    );
-                  })}
-                </div>
+                          <div
+                            style={{
+                              fontFamily: MONO,
+                              fontSize: 10.5,
+                              padding: "6px 10px",
+                              borderRadius: 6,
+                              background: "var(--surf2)",
+                              border: "1px solid var(--bd-soft)",
+                              color: "var(--ink)",
+                            }}
+                          >
+                            <strong style={{ color: "var(--cyan)" }}>CÔNG THỨC:</strong> {activePillar.explainFormula}
+                          </div>
+                          <p style={{ margin: 0, fontSize: 12.5, color: "var(--mut)", lineHeight: 1.55 }}>
+                            {activePillar.explainDetail}
+                          </p>
+                        </div>
+                      )}
+                    </>
+                  );
+                })()}
               </div>
 
               <div className="salx-card p-5 lg:col-span-5">
@@ -1723,7 +1756,6 @@ export default function HomePage() {
                           <div
                             className="mt-2.5 pt-2.5 text-xs salx-fade-up"
                             style={{
-                              borderTop: "1px solid var(--gd)",
                               background: "var(--surf)",
                               margin: "10px -4px -4px",
                               padding: "10px 12px",
