@@ -5,6 +5,23 @@ import type {
   WhatIfResult,
 } from "@/types/radar";
 
+const SECTOR_VN_MAP: Record<string, string> = {
+  Banking: "Ngân hàng",
+  Securities: "Chứng khoán",
+  RealEstate: "Bất động sản",
+  Materials_Steel: "Thép & Vật liệu",
+  Retail_Consumer: "Bán lẻ & Tiêu dùng",
+  Technology_Telecom: "Công nghệ & Viễn thông",
+  Oil_Gas_Energy: "Dầu khí & Năng lượng",
+  Industrial_Logistics: "Công nghiệp & Cảng biển",
+  Other: "Khác",
+};
+
+export function vnSectorName(sec?: string): string {
+  if (!sec) return "Khác";
+  return SECTOR_VN_MAP[sec] || sec;
+}
+
 export function computeHhi(weights: number[]): { hhi: number; nEff: number } {
   const clean = weights.filter((w) => w > 0);
   const total = clean.reduce((a, b) => a + b, 0);
@@ -68,7 +85,7 @@ export function computeClientPortfolioHealth(
 
   const sectorWeights: Record<string, number> = {};
   syms.forEach((s) => {
-    const sec = discoveryMap[s]?.sector || "Other";
+    const sec = vnSectorName(discoveryMap[s]?.sector);
     sectorWeights[sec] = (sectorWeights[sec] || 0) + wEq[s];
   });
   const { hhi: hhiSector } = computeHhi(Object.values(sectorWeights));
@@ -159,12 +176,12 @@ export function computeClientPortfolioHealth(
 
   // Multi-dimensional Stress Tests (Market Beta + Sector Shocks + Correlation Spike)
   const topSectorEntry = Object.entries(sectorWeights).sort((a, b) => b[1] - a[1])[0];
-  const topSectorName = topSectorEntry ? topSectorEntry[0] : "Banking";
+  const topSectorName = topSectorEntry ? topSectorEntry[0] : "Ngân hàng";
   const topSectorVal = topSectorEntry ? topSectorEntry[1] * equityVal : 0;
 
   const stressTests: Record<string, number> = {
-    "VNINDEX -3% (Beta)": Math.round(-0.03 * portBeta * totalNav),
-    "VNINDEX -5% (Beta)": Math.round(-0.05 * portBeta * totalNav),
+    "VNINDEX -3% (Theo Beta)": Math.round(-0.03 * portBeta * totalNav),
+    "VNINDEX -5% (Theo Beta)": Math.round(-0.05 * portBeta * totalNav),
     "VNINDEX -7% (Bán tháo)": Math.round(-0.07 * portBeta * totalNav),
     [`Cú sốc ngành ${topSectorName} (-7%)`]: Math.round(-0.07 * topSectorVal - 0.02 * (equityVal - topSectorVal)),
     "Khủng hoảng Tương quan (ρ → 1.0)": Math.round(-histEs95Pct * 1.35 * totalNav),
@@ -260,7 +277,7 @@ export function computeClientWhatIf(
     avgCorr = corrs.reduce((a, b) => a + b, 0) / corrs.length;
   }
 
-  const sec = discoveryMap[sym]?.sector || "Other";
+  const sec = vnSectorName(discoveryMap[sym]?.sector);
   const secBefore = Number(((before.sector_weights[sec] || 0) * 100).toFixed(1));
   const secAfter = Number(((after.sector_weights[sec] || 0) * 100).toFixed(1));
 
@@ -393,7 +410,7 @@ export function evaluateClientOrderBook(
   const feeTaxPct = side === "buy" ? 0.15 : 0.25;
 
   const note = sufficient
-    ? `Đủ độ sâu 3 bước giá để khớp toàn bộ ${orderValueVnd.toLocaleString("vi-VN")} đ. Tách riêng Market Impact (${Math.max(
+    ? `Đủ độ sâu 3 bước giá để khớp toàn bộ ${orderValueVnd.toLocaleString("vi-VN")} đ. Tách riêng Độ trượt giá sổ lệnh (${Math.max(
         0,
         rawCostPct
       ).toFixed(3)}%) và Phí/Thuế giả định (${feeTaxPct.toFixed(2)}%).`

@@ -35,9 +35,19 @@ import {
   computeClientPortfolioHealth,
   computeClientWhatIf,
   evaluateClientOrderBook,
+  vnSectorName,
 } from "@/lib/quant";
 
 type TabId = "regime" | "discovery" | "portfolio" | "orderbook" | "validation";
+
+const REGIME_VN_MAP: Record<string, string> = {
+  Positive: "Tích cực (Thuận lợi)",
+  Neutral: "Trung tính (Phân hóa)",
+  Defensive: "Phòng thủ (Thận trọng)",
+  "High Risk": "Rủi ro cao",
+};
+
+const vnRegime = (r: string) => REGIME_VN_MAP[r] || r;
 
 const fmtVnd = (n: number) =>
   new Intl.NumberFormat("vi-VN", { maximumFractionDigits: 0 }).format(Math.round(n)) + " đ";
@@ -796,11 +806,11 @@ export default function HomePage() {
               <div>
                 <div className="flex flex-wrap items-center gap-2.5">
                   <h1 className={`text-lg font-extrabold tracking-tight sm:text-xl ${textBright}`}>
-                    PORI <span className="font-semibold text-blue-500">QUANT COCKPIT</span>
+                    PORI <span className="font-semibold text-blue-500">• TRẠM ĐỊNH LƯỢNG & RỦI RO DANH MỤC</span>
                   </h1>
                   <span className="inline-flex items-center gap-1.5 rounded-full border border-emerald-300 bg-emerald-50 px-2.5 py-0.5 text-[11px] font-bold text-emerald-700">
                     <span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
-                    ENGINE ACTIVE • {bundle.sessions_count} PHIÊN
+                    ĐANG HOẠT ĐỘNG • {bundle.sessions_count} PHIÊN
                   </span>
                 </div>
                 <p className={`text-xs ${textMuted}`}>
@@ -819,7 +829,7 @@ export default function HomePage() {
               </span>
 
               <span className={`rounded-lg border px-3 py-1.5 font-bold ${regimePill(regime.regime)}`}>
-                Khí áp: {regime.regime.toUpperCase()}
+                Khí áp: {vnRegime(regime.regime).toUpperCase()}
               </span>
 
               <button
@@ -832,7 +842,7 @@ export default function HomePage() {
                     : "border-slate-200 bg-slate-100 text-slate-700 hover:bg-slate-200"
                 }`}
               >
-                Auto-Sync: {autoRefresh ? "BẬT (60s)" : "TẮT"}
+                Tự động cập nhật: {autoRefresh ? "BẬT (60s)" : "TẮT"}
               </button>
 
               <button
@@ -858,7 +868,7 @@ export default function HomePage() {
                 title="Đổi giao diện Sáng / Tối"
               >
                 {darkMode ? <Sun className="h-3.5 w-3.5" /> : <Moon className="h-3.5 w-3.5" />}
-                {darkMode ? "Light" : "Dark"}
+                {darkMode ? "Giao diện Sáng" : "Giao diện Tối"}
               </button>
             </div>
           </div>
@@ -866,10 +876,10 @@ export default function HomePage() {
           <div className="mt-3 flex flex-wrap gap-1.5">
             {[
               { id: "regime", label: "🌐 Màn hình 1: Khí Áp & Luân Chuyển Ngành", icon: Activity },
-              { id: "discovery", label: "🎯 Màn hình 2: Tầm Soát Alpha & Hồ Sơ 360°", icon: Search },
-              { id: "portfolio", label: "🛡️ Màn hình 3: Khám Danh Mục & Mô Phỏng What-If", icon: ShieldCheck },
+              { id: "discovery", label: "🎯 Màn hình 2: Tầm Soát Cổ Phiếu & Hồ Sơ 360°", icon: Search },
+              { id: "portfolio", label: "🛡️ Màn hình 3: Khám Danh Mục & Mô Phỏng Mua Thêm", icon: ShieldCheck },
               { id: "orderbook", label: "⚡ Màn hình 4: Sổ Lệnh 3 Bước Giá & Chi Phí Khớp", icon: Layers },
-              { id: "validation", label: "🔬 Màn hình 5: Kiểm Chứng, Data Mapping & Thiết Kế", icon: BarChart3 },
+              { id: "validation", label: "🔬 Màn hình 5: Kiểm Chứng Mô Hình & Ánh Xạ Dữ Liệu", icon: BarChart3 },
             ].map((tab) => {
               const active = activeTab === tab.id;
               return (
@@ -919,14 +929,14 @@ export default function HomePage() {
                 1. Phán quyết Khí áp & Đồng thuận Tín hiệu
               </div>
               <div className={`mt-1 text-sm font-bold ${textBright}`}>
-                {regime.regime} ({regime.positive_pillars}/3 trụ cột tích cực • Điểm đồng thuận: {regime.consensus_score})
+                {vnRegime(regime.regime)} ({regime.positive_pillars}/3 trụ cột tích cực • Điểm đồng thuận: {regime.consensus_score})
               </div>
               <p className={`mt-1 text-xs ${textMuted}`}>{regime.summary}</p>
             </div>
 
             <div className={`rounded-lg border p-3 ${bgCard}`}>
               <div className={`text-[11px] font-semibold uppercase ${textMuted}`}>
-                2. Top 4 Cổ phiếu Điểm Alpha cao nhất
+                2. Top 4 Cổ phiếu Điểm Tín hiệu (Alpha) cao nhất
               </div>
               <div className="mt-1.5 flex flex-wrap gap-1.5">
                 {bundle.discovery.slice(0, 4).map((d) => (
@@ -943,19 +953,19 @@ export default function HomePage() {
                 ))}
               </div>
               <p className={`mt-1.5 text-xs ${textMuted}`}>
-                Tách riêng Alpha Score (tín hiệu thị trường) với Portfolio Fit Score.
+                Tách riêng Điểm Alpha (tín hiệu thị trường) với Điểm Tương thích Danh mục.
               </p>
             </div>
 
             <div className={`rounded-lg border p-3 ${bgCard}`}>
               <div className={`text-[11px] font-semibold uppercase ${textMuted}`}>
-                3. Gợi ý Tương thích Danh mục (Portfolio-Aware Best Fit)
+                3. Gợi ý Tương thích Danh mục (Phù hợp Rủi ro nhất)
               </div>
               {bestFitCandidate ? (
                 <>
                   <div className="mt-1 flex items-center justify-between">
                     <span className={`text-sm font-bold ${textBright}`}>
-                      Ứng viên: <span className="text-emerald-400">{bestFitCandidate.candidate_symbol}</span> (Fit:{" "}
+                      Ứng viên: <span className="text-emerald-400">{bestFitCandidate.candidate_symbol}</span> (Tương thích:{" "}
                       {bestFitCandidate.portfolio_fit_score}/100)
                     </span>
                     <button
@@ -970,7 +980,7 @@ export default function HomePage() {
                   </div>
                   <p className={`mt-1 text-xs ${textMuted}`}>
                     Tương quan TB = {bestFitCandidate.avg_corr_with_portfolio} • ΔHHI ={" "}
-                    {bestFitCandidate.delta_hhi_stock.toFixed(3)} • DTL = {bestFitCandidate.candidate_dtl_days ?? 0.2}d
+                    {bestFitCandidate.delta_hhi_stock.toFixed(3)} • Thanh lý: {bestFitCandidate.candidate_dtl_days ?? 0.2} phiên
                   </p>
                 </>
               ) : null}
@@ -1054,9 +1064,9 @@ export default function HomePage() {
 
                 <div className="mt-4 grid gap-3 sm:grid-cols-3">
                   {[
-                    { title: "1. Xu hướng (Trend)", desc: regime.trend_status },
-                    { title: "2. Độ lan tỏa (Breadth)", desc: regime.breadth_status },
-                    { title: "3. Thanh khoản & Ngoại", desc: regime.liquidity_status },
+                    { title: "1. Xu hướng thị trường", desc: regime.trend_status },
+                    { title: "2. Độ lan tỏa dòng tiền", desc: regime.breadth_status },
+                    { title: "3. Thanh khoản & Khối ngoại", desc: regime.liquidity_status },
                   ].map((p) => (
                     <div key={p.title} className={`rounded-lg border p-3 ${bgSub}`}>
                       <div className="text-xs font-bold text-blue-500">{p.title}</div>
@@ -1088,10 +1098,10 @@ export default function HomePage() {
                     >
                       <div className="flex items-center justify-between text-xs">
                         <span className={`font-bold ${textBright}`}>
-                          {sec.sector} <span className={textMuted}>({sec.stock_count} mã)</span>
+                          {vnSectorName(sec.sector)} <span className={textMuted}>({sec.stock_count} mã)</span>
                         </span>
                         <span className="font-mono-num font-bold text-blue-500">
-                          Alpha TB: {sec.avg_alpha_score}
+                          Điểm Alpha TB: {sec.avg_alpha_score}
                         </span>
                       </div>
                       <div className="mt-1.5 h-2 w-full overflow-hidden rounded-full bg-slate-200 dark:bg-slate-800">
@@ -1103,7 +1113,7 @@ export default function HomePage() {
                       <div className={`mt-1.5 flex justify-between text-[11px] ${textMuted}`}>
                         <span>Trên MA20: {sec.pct_above_ma20}%</span>
                         <span>
-                          RS 20d TB:{" "}
+                          SM giá 20p TB:{" "}
                           <strong className={sec.avg_rs_20d_pct >= 0 ? "text-emerald-500" : "text-rose-500"}>
                             {sec.avg_rs_20d_pct >= 0 ? "+" : ""}
                             {sec.avg_rs_20d_pct}%
@@ -1157,7 +1167,7 @@ export default function HomePage() {
                   >
                     {sectors.map((s) => (
                       <option key={s} value={s}>
-                        {s === "ALL" ? "Tất cả nhóm ngành" : s}
+                        {s === "ALL" ? "Tất cả nhóm ngành" : vnSectorName(s)}
                       </option>
                     ))}
                   </select>
@@ -1207,10 +1217,10 @@ export default function HomePage() {
                         <th className="px-3 py-3">Mã CK</th>
                         <th className="px-2 py-3">Ngành</th>
                         <th className="px-2 py-3 text-right">Giá (VNĐ)</th>
-                        <th className="px-2 py-3 text-right">RS 20d</th>
-                        <th className="px-2 py-3 text-center">Trend / Liq</th>
-                        <th className="px-2 py-3 text-center">Alpha Score</th>
-                        <th className="px-2 py-3 text-center">Portfolio Fit</th>
+                        <th className="px-2 py-3 text-right">SM Giá 20p</th>
+                        <th className="px-2 py-3 text-center">Xu hướng / TK</th>
+                        <th className="px-2 py-3 text-center">Điểm Alpha</th>
+                        <th className="px-2 py-3 text-center">Độ Tương thích</th>
                         <th className="px-3 py-3 text-right">Thao tác</th>
                       </tr>
                     </thead>
@@ -1246,7 +1256,7 @@ export default function HomePage() {
                                 )}
                               </div>
                             </td>
-                            <td className={`px-2 py-2.5 ${textMuted}`}>{item.sector}</td>
+                            <td className={`px-2 py-2.5 ${textMuted}`}>{vnSectorName(item.sector)}</td>
                             <td className={`px-2 py-2.5 text-right font-mono-num font-semibold ${textBright}`}>
                               {item.close_price.toLocaleString("vi-VN")}
                             </td>
@@ -1291,7 +1301,7 @@ export default function HomePage() {
                                 }}
                                 className="rounded border border-emerald-500/40 bg-emerald-500/15 px-2 py-1 text-[11px] font-bold text-emerald-300 hover:bg-emerald-600 hover:text-white"
                               >
-                                + What-If
+                                + Mô phỏng
                               </button>
                             </td>
                           </tr>
@@ -1310,7 +1320,7 @@ export default function HomePage() {
                   <div className="flex items-start justify-between border-b border-slate-800 pb-3">
                     <div>
                       <span className="rounded bg-blue-500/20 px-2 py-0.5 text-[10px] font-bold uppercase text-blue-300">
-                        Why This Stock? • {selectedStock.sector}
+                        Hồ sơ 360° • {vnSectorName(selectedStock.sector)}
                       </span>
                       <h3 className={`mt-1 text-2xl font-extrabold ${textBright}`}>
                         {selectedStock.symbol}{" "}
@@ -1321,14 +1331,14 @@ export default function HomePage() {
                     </div>
                     <div className="flex gap-2 text-right">
                       <div className="rounded-lg border border-blue-500/40 bg-blue-500/15 px-2.5 py-1.5 text-center">
-                        <div className="text-[10px] font-bold text-blue-300">ALPHA</div>
+                        <div className="text-[10px] font-bold text-blue-300">ĐIỂM ALPHA</div>
                         <div className="font-mono-num text-lg font-extrabold text-blue-400">
                           {selectedStock.alpha_score}
                         </div>
                       </div>
                       {selectedFit && (
                         <div className="rounded-lg border border-emerald-500/40 bg-emerald-500/15 px-2.5 py-1.5 text-center">
-                          <div className="text-[10px] font-bold text-emerald-300">PORT FIT</div>
+                          <div className="text-[10px] font-bold text-emerald-300">TƯƠNG THÍCH</div>
                           <div className="font-mono-num text-lg font-extrabold text-emerald-400">
                             {selectedFit.portfolio_fit_score}
                           </div>
@@ -1351,16 +1361,16 @@ export default function HomePage() {
 
                   <div className={`space-y-2 rounded-lg border p-3.5 text-xs ${bgSub}`}>
                     <div className="flex justify-between font-bold">
-                      <span>Phân rã 4 Cấu phần Alpha Score</span>
+                      <span>Phân rã 4 Cấu phần Điểm Alpha</span>
                       <span className="text-blue-400">
                         Độ đầy đủ dữ liệu: {Math.round(selectedStock.data_completeness * 100)}%
                       </span>
                     </div>
                     {[
-                      { label: "1. Trend & Momentum (35%)", val: selectedStock.trend_score, col: "bg-blue-500" },
-                      { label: "2. Liquidity & Trading Quality (25%)", val: selectedStock.liquidity_score, col: "bg-emerald-500" },
-                      { label: "3. Foreign Flow (15%)", val: selectedStock.foreign_score, col: "bg-indigo-500" },
-                      { label: "4. Fundamental Quality (25%)", val: selectedStock.fundamental_score, col: "bg-amber-500" },
+                      { label: "1. Xu hướng & Động lượng giá (35%)", val: selectedStock.trend_score, col: "bg-blue-500" },
+                      { label: "2. Thanh khoản & Chất lượng sổ lệnh (25%)", val: selectedStock.liquidity_score, col: "bg-emerald-500" },
+                      { label: "3. Dòng tiền Khối ngoại (15%)", val: selectedStock.foreign_score, col: "bg-indigo-500" },
+                      { label: "4. Chất lượng Cơ bản Doanh nghiệp (25%)", val: selectedStock.fundamental_score, col: "bg-amber-500" },
                     ].map((c) => (
                       <div key={c.label}>
                         <div className="mb-1 flex justify-between">
@@ -1433,7 +1443,7 @@ export default function HomePage() {
                       }}
                       className="rounded-lg bg-blue-600 px-3 py-2 text-xs font-bold text-white hover:bg-blue-700"
                     >
-                      Mô phỏng What-If →
+                      Mô phỏng Mua thêm →
                     </button>
                     <button
                       onClick={() => {
@@ -1572,7 +1582,7 @@ export default function HomePage() {
                   >
                     {bundle.discovery.map((d) => (
                       <option key={d.symbol} value={d.symbol}>
-                        {d.symbol} ({d.sector})
+                        {d.symbol} ({vnSectorName(d.sector)})
                       </option>
                     ))}
                   </select>
@@ -1621,10 +1631,10 @@ export default function HomePage() {
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <div>
                   <span className="rounded bg-blue-500/20 px-2 py-0.5 text-[10px] font-extrabold uppercase text-blue-300">
-                    Portfolio-Aware Discovery • Đối chiếu 5 Chiều Trước & Sau
+                    Tầm soát Gắn với Danh mục • Đối chiếu 5 Chiều Trước & Sau
                   </span>
                   <h3 className={`mt-1 text-base font-bold ${textBright}`}>
-                    Mô phỏng Tác động Quyết định Phân bổ Danh mục (What-If Impact)
+                    Mô phỏng Tác động Quyết định Phân bổ Danh mục (Trước vs. Sau khi Mua thêm)
                   </h3>
                 </div>
 
@@ -1638,7 +1648,7 @@ export default function HomePage() {
                     >
                       {bundle.discovery.map((d) => (
                         <option key={d.symbol} value={d.symbol}>
-                          {d.symbol} — {d.sector} (Alpha: {d.alpha_score})
+                          {d.symbol} — {vnSectorName(d.sector)} (Điểm Alpha: {d.alpha_score})
                         </option>
                       ))}
                     </select>
@@ -1739,13 +1749,13 @@ export default function HomePage() {
 
                     <div className={`rounded-lg border p-3 ${bgSub}`}>
                       <div className={`text-[11px] font-semibold ${textMuted}`}>
-                        5. Khả năng Thanh khoản & Fit Score
+                        5. Khả năng Thanh khoản & Điểm Tương thích
                       </div>
                       <div className="font-mono-num mt-1 text-lg font-extrabold text-emerald-400">
-                        Fit: {activeWhatIf.portfolio_fit_score}/100
+                        Tương thích: {activeWhatIf.portfolio_fit_score}/100
                       </div>
                       <div className={`mt-1 text-[11px] ${textMuted}`}>
-                        DTL (@10% ADV): <strong>{activeWhatIf.candidate_dtl_days ?? 0.2} phiên</strong> (
+                        Thoát hàng (@10% KLGD): <strong>{activeWhatIf.candidate_dtl_days ?? 0.2} phiên</strong> (
                         {activeWhatIf.liquidity_feasible ? "Đáp ứng tốt" : "Cần chia nhỏ lệnh"})
                       </div>
                     </div>
@@ -1880,13 +1890,13 @@ export default function HomePage() {
             <div className={`space-y-4 rounded-xl border p-5 lg:col-span-5 ${bgCard}`}>
               <div>
                 <span className="rounded bg-blue-500/20 px-2 py-0.5 text-[10px] font-bold uppercase text-blue-300">
-                  Microstructure Liquidity Engine
+                  Phân tích Vi cấu trúc Sổ lệnh
                 </span>
                 <h2 className={`mt-1 text-lg font-bold ${textBright}`}>
-                  Order Book Liquidity & Estimated Execution Cost
+                  Thanh khoản Sổ lệnh & Chi phí Khớp lệnh Ước tính (3 Bước Giá)
                 </h2>
                 <p className={`text-xs ${textMuted}`}>
-                  Hiển thị tách biệt OBI (3 mức giá), Bid-Ask Spread (%), Độ sâu 3 bước giá và Market Impact theo quy mô lệnh giả định (tuyệt đối không ngoại suy vượt độ sâu 3 bước giá).
+                  Hiển thị tách biệt Mất cân bằng cung cầu (OBI 3 mức), Chênh lệch giá mua-bán (%), Độ sâu 3 bước giá và Độ trượt giá sổ lệnh theo quy mô lệnh giả định (tuyệt đối không ngoại suy vượt độ sâu 3 bước giá).
                 </p>
               </div>
 
@@ -1962,7 +1972,7 @@ export default function HomePage() {
                       </div>
                     </div>
                     <div className={`rounded-lg border p-3 ${bgSub}`}>
-                      <div className={`text-[11px] ${textMuted}`}>2. Bid-Ask Spread (%)</div>
+                      <div className={`text-[11px] ${textMuted}`}>2. Chênh lệch Mua - Bán (%)</div>
                       <div className={`font-mono-num mt-0.5 text-xl font-extrabold ${textBright}`}>
                         {activeOrderBookEval.eval.spread_pct.toFixed(2)}%
                       </div>
@@ -1974,7 +1984,7 @@ export default function HomePage() {
                       </div>
                     </div>
                     <div className={`rounded-lg border p-3 ${bgSub}`}>
-                      <div className={`text-[11px] ${textMuted}`}>4. Market Impact (Tách riêng Phí)</div>
+                      <div className={`text-[11px] ${textMuted}`}>4. Độ trượt giá sổ lệnh (Chưa phí)</div>
                       <div className="font-mono-num mt-0.5 text-xl font-extrabold text-rose-500">
                         +{activeOrderBookEval.eval.estimated_cost_pct.toFixed(3)}%
                       </div>
@@ -2139,13 +2149,13 @@ export default function HomePage() {
               {/* 1. Signal Validation separated from VaR & broken down by signal group */}
               <div className={`rounded-xl border p-5 ${bgCard}`}>
                 <span className="rounded bg-blue-500/20 px-2 py-0.5 text-[10px] font-bold uppercase text-blue-300">
-                  Bài toán Kiểm định 1 — Signal Performance Tracking
+                  Bài toán Kiểm định 1 — Theo dõi Hiệu suất Tín hiệu
                 </span>
                 <h3 className={`mt-1 text-base font-bold ${textBright}`}>
-                  Signal Validation — Hiệu suất theo Kỳ hạn & Nhóm Tín hiệu (vs VNINDEX)
+                  Kiểm chứng Tín hiệu Sàng lọc — Hiệu suất theo Kỳ hạn so với VNINDEX
                 </h3>
                 <p className={`mt-1 text-xs ${textMuted}`}>
-                  Đo lợi suất vượt trội sau thời điểm phát sinh tín hiệu (vào lệnh tại T+1 để chống Look-Ahead Bias, đã trừ 0.30% phí/thuế).
+                  Đo lợi suất vượt trội sau thời điểm phát sinh tín hiệu (vào lệnh tại T+1 để chống nhìn trước tương lai, đã trừ 0.30% phí/thuế).
                 </p>
 
                 <div className="mt-4 overflow-x-auto">
@@ -2154,9 +2164,9 @@ export default function HomePage() {
                       <tr>
                         <th className="p-2.5">Nhóm Tín hiệu / Kỳ hạn</th>
                         <th className="p-2.5 text-right">Số mẫu</th>
-                        <th className="p-2.5 text-right">Excess Return TB</th>
-                        <th className="p-2.5 text-right">Median Excess</th>
-                        <th className="p-2.5 text-right">Win Rate</th>
+                        <th className="p-2.5 text-right">Lợi suất vượt trội TB</th>
+                        <th className="p-2.5 text-right">Trung vị vượt trội</th>
+                        <th className="p-2.5 text-right">Tỷ lệ Thắng</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-800">
@@ -2190,10 +2200,10 @@ export default function HomePage() {
               {/* 2. Risk Model Validation (VaR Backtesting) */}
               <div className={`rounded-xl border p-5 ${bgCard}`}>
                 <span className="rounded bg-emerald-500/20 px-2 py-0.5 text-[10px] font-bold uppercase text-emerald-300">
-                  Bài toán Kiểm định 2 — Risk Model Validation
+                  Bài toán Kiểm định 2 — Kiểm định Mô hình Rủi ro
                 </span>
                 <h3 className={`mt-1 text-base font-bold ${textBright}`}>
-                  VaR Backtesting — Kiểm định Vượt ngưỡng Historical VaR 95% (257 Phiên)
+                  Kiểm định Mô hình VaR Lịch sử 95% (Chuỗi 257 Phiên)
                 </h3>
                 <p className={`mt-1 text-xs ${textMuted}`}>
                   So sánh mức lỗ thực tế hàng ngày của danh mục với ngưỡng VaR 95% dự báo từ cửa sổ trượt{" "}
@@ -2293,28 +2303,28 @@ export default function HomePage() {
               <div className="mt-3 grid gap-3 md:grid-cols-2 lg:grid-cols-3 text-xs">
                 {[
                   {
-                    q: "1. Data Availability (Khả năng cung cấp dữ liệu)",
-                    a: "Đã đối chiếu toàn bộ tài liệu NeoAPI Docs & SSI v3: xác nhận chính xác endpoint JWT Auth, /stock/stockDetail (trả 3 mức Bid/Ask, room ngoại, events) và SSI 1D OHLC.",
+                    q: "1. Khả năng cung cấp dữ liệu thực tế",
+                    a: "Đã đối chiếu toàn bộ tài liệu NeoAPI Docs & SSI v3: xác nhận chính xác endpoint JWT Auth, /stock/stockDetail (trả 3 mức Bid/Ask, room ngoại, sự kiện quyền) và SSI 1D OHLC.",
                   },
                   {
-                    q: "2. Data Consistency (Đồng nhất NEO & SSI)",
+                    q: "2. Tính nhất quán dữ liệu giữa NEO & SSI",
                     a: "Cả hai nguồn đều được chuẩn hóa về đơn vị đồng (VNĐ số nguyên, VD: VCB = 50,200 đ), khối lượng cổ phiếu (lô 100) và múi giờ Asia/Ho_Chi_Minh (+07:00).",
                   },
                   {
-                    q: "3. Scoring Methodology (Chống trùng lặp & Thiếu dữ liệu)",
-                    a: "Chuẩn hóa Winsorization [2.5%, 97.5%] + Percentile Ranking (0–100). Chỉ dùng 1 chỉ báo RS 20d trong nhóm Momentum; OBI giới hạn <= 5% tổng điểm; thiếu BCTC được chuẩn hóa lại trọng số chứ không gán 0.",
+                    q: "3. Phương pháp chấm điểm (Chống trùng lặp & Thiếu dữ liệu)",
+                    a: "Chuẩn hóa Winsorization [2.5%, 97.5%] + Xếp hạng phân vị (0–100). Chỉ dùng 1 chỉ báo sức mạnh giá 20p trong nhóm Động lượng; OBI giới hạn <= 5% tổng điểm; thiếu BCTC được chuẩn hóa lại trọng số chứ không gán 0.",
                   },
                   {
-                    q: "4. Portfolio Risk (Phương pháp & Giả định VaR/ES)",
-                    a: "Chọn Historical VaR 95% & ES 95% (1 ngày, không tái cân bằng nội ngày) trên cửa sổ 130–257 phiên làm phương pháp chính; bổ sung Parametric VaR và Đóng góp rủi ro biên để đối chiếu.",
+                    q: "4. Đo lường rủi ro danh mục (Phương pháp & Giả định VaR/ES)",
+                    a: "Chọn VaR lịch sử 95% & Tổn thất kỳ vọng ES 95% (1 ngày, không tái cân bằng nội ngày) trên cửa sổ 130–257 phiên làm phương pháp chính; bổ sung VaR tham số và Đóng góp rủi ro biên để đối chiếu.",
                   },
                   {
-                    q: "5. Execution Feasibility (Giới hạn Sổ lệnh 3 mức giá)",
-                    a: "Đổi tên chuẩn xác thành Order Book Liquidity & Estimated Execution Cost. Mô phỏng khớp qua 3 bước giá Bid/Ask; nếu lệnh vượt tổng độ sâu 3 mức giá thì phát cảnh báo đỏ, tuyệt đối không ngoại suy.",
+                    q: "5. Tính khả thi khớp lệnh (Giới hạn Sổ lệnh 3 mức giá)",
+                    a: "Hiển thị rõ Thanh khoản Sổ lệnh & Chi phí Khớp lệnh Ước tính. Mô phỏng khớp qua 3 bước giá Bid/Ask; nếu lệnh vượt tổng độ sâu 3 mức giá thì phát cảnh báo đỏ, tuyệt đối không ngoại suy.",
                   },
                   {
-                    q: "6. Validation & 7. Product Reliability",
-                    a: "Tách riêng Signal Validation (vào lệnh T+1 chống look-ahead, trừ phí 0.3%) và VaR Backtesting (136 phiên ngoài mẫu). Kiến trúc Dual-Mode giúp hệ thống luôn chạy mượt ngay cả khi 1 API mất kết nối hoặc khác IP.",
+                    q: "6. Kiểm định ngoài mẫu & 7. Độ ổn định vận hành",
+                    a: "Tách riêng Kiểm định Tín hiệu (vào lệnh T+1 chống nhìn trước tương lai, trừ phí 0.3%) và Kiểm định VaR (136 phiên ngoài mẫu). Kiến trúc 2 nguồn dữ liệu giúp hệ thống luôn chạy mượt ngay cả khi 1 API mất kết nối hoặc khác IP.",
                   },
                 ].map((item) => (
                   <div key={item.q} className={`rounded-lg border p-3 ${bgSub}`}>
