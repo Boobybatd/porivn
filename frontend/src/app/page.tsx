@@ -217,32 +217,52 @@ function StatCard({
 }
 
 /* ============================================================================
-   SVG CHART 1: VNINDEX + MA20 + MA50 + VOLUME (SALX Neon Mint & Cyan Palette)
+   SVG CHART 1: VNINDEX + MA20 + MA50 + VOLUME WITH ZOOM & PAN (KÉO RA / KÉO VÀO)
    ============================================================================ */
 function VnindexChart({ data, dark }: { data: VnindexPoint[]; dark: boolean }) {
   const [hoverIdx, setHoverIdx] = useState<number | null>(null);
+  const [winSize, setWinSize] = useState<number>(data?.length || 90);
+  const [startIdx, setStartIdx] = useState<number>(0);
+  const dragRef = useRef<{ active: boolean; startX: number; origStart: number }>({
+    active: false,
+    startX: 0,
+    origStart: 0,
+  });
+
+  useEffect(() => {
+    if (data && data.length > 0) {
+      setWinSize(data.length);
+      setStartIdx(0);
+    }
+  }, [data]);
 
   if (!data || data.length < 5) return null;
+
+  const totalLen = data.length;
+  const clampedWin = Math.max(15, Math.min(totalLen, winSize));
+  const clampedStart = Math.max(0, Math.min(totalLen - clampedWin, startIdx));
+  const slice = data.slice(clampedStart, clampedStart + clampedWin);
+
   const w = 860;
-  const h = 285;
-  const padL = 50;
+  const h = 290;
+  const padL = 52;
   const padR = 18;
   const padT = 22;
   const padB = 34;
 
-  const allVals = data.flatMap((d) =>
+  const allVals = slice.flatMap((d) =>
     [d.close, d.ma20 ?? d.close, d.ma50 ?? d.close].filter((v): v is number => v !== null)
   );
-  const minP = Math.min(...allVals) * 0.995;
-  const maxP = Math.max(...allVals) * 1.005;
-  const maxV = Math.max(...data.map((d) => d.volume || 1));
+  const minP = Math.min(...allVals) * 0.996;
+  const maxP = Math.max(...allVals) * 1.004;
+  const maxV = Math.max(...slice.map((d) => d.volume || 1));
 
-  const xAt = (i: number) => padL + (i / (data.length - 1)) * (w - padL - padR);
+  const xAt = (i: number) => padL + (i / Math.max(1, slice.length - 1)) * (w - padL - padR);
   const yAt = (p: number) => padT + (1 - (p - minP) / Math.max(1, maxP - minP)) * (h - padT - padB);
 
   const linePath = (getter: (d: VnindexPoint) => number | null) => {
     const pts: string[] = [];
-    data.forEach((d, i) => {
+    slice.forEach((d, i) => {
       const v = getter(d);
       if (v !== null) {
         pts.push(`${pts.length === 0 ? "M" : "L"}${xAt(i).toFixed(1)},${yAt(v).toFixed(1)}`);
@@ -252,28 +272,170 @@ function VnindexChart({ data, dark }: { data: VnindexPoint[]; dark: boolean }) {
   };
 
   const closePath = linePath((d) => d.close);
-  const areaPath = `${closePath} L${xAt(data.length - 1).toFixed(1)},${h - padB} L${xAt(0).toFixed(1)},${h - padB} Z`;
+  const areaPath = `${closePath} L${xAt(slice.length - 1).toFixed(1)},${h - padB} L${xAt(0).toFixed(1)},${h - padB} Z`;
   const ma20Path = linePath((d) => d.ma20);
   const ma50Path = linePath((d) => d.ma50);
 
   const yTicks = [minP, (minP + maxP) / 2, maxP];
-  const xIdxs = [0, Math.floor(data.length / 2), data.length - 1];
+  const xIdxs = [0, Math.floor(slice.length / 2), slice.length - 1];
 
-  const activeIdx = hoverIdx !== null ? hoverIdx : data.length - 1;
-  const activePt = data[activeIdx];
-  const prevPt = activeIdx > 0 ? data[activeIdx - 1] : activePt;
-  const chgPct = prevPt && prevPt.close > 0 ? ((activePt.close - prevPt.close) / prevPt.close) * 100 : 0;
+  const activeIdx =
+    hoverIdx !== null && hoverIdx < slice.length ? hoverIdx : slice.length - 1;
+  const activePt = slice[activeIdx];
+  const globalIdx = clampedStart + activeIdx;
+  const prevPt = globalIdx > 0 ? data[globalIdx - 1] : activePt;
+  const chgPct =
+    prevPt && prevPt.close > 0 ? ((activePt.close - prevPt.close) / prevPt.close) * 100 : 0;
+
+  const setPresetWindow = (size: number) => {
+    const nw = Math.max(15, Math.min(totalLen, size));
+    setWinSize(nw);
+    setStartIdx(Math.max(0, totalLen - nw));
+    setHoverIdx(null);
+  };
+
+  const zoomBy = (delta: number) => {
+    const nw = Math.max(15, Math.min(totalLen, clampedWin + delta));
+    const center = clampedStart + Math.floor(clampedWin / 2);
+    const ns = Math.max(0, Math.min(totalLen - nw, center - Math.floor(nw / 2)));
+    setWinSize(nw);
+    setStartIdx(ns);
+  };
+
+  const handleWheel = (e: React.WheelEvent<SVGSVGElement>) => {
+    e.preventDefault();
+    zoomBy(e.deltaY > 0 ? 10 : -10);
+  };
+
+  const handleMouseDown = (e: React.MouseEvent<SVGSVGElement>) => {
+    dragRef.current = { active: true, startX: e.clientX, origStart: clampedStart };
+  };
 
   const handleMouseMove = (e: React.MouseEvent<SVGSVGElement>) => {
     const rect = e.currentTarget.getBoundingClientRect();
+    if (dragRef.current.active && clampedWin < totalLen) {
+      const dxPx = e.clientX - dragRef.current.startX;
+      const barsShift = Math.round((-dxPx / Math.max(1, rect.width)) * clampedWin);
+      const ns = Math.max(0, Math.min(totalLen - clampedWin, dragRef.current.origStart + barsShift));
+      setStartIdx(ns);
+      return;
+    }
     const relX = ((e.clientX - rect.left) / rect.width) * w;
     const ratio = (relX - padL) / (w - padL - padR);
-    const idx = Math.min(data.length - 1, Math.max(0, Math.round(ratio * (data.length - 1))));
+    const idx = Math.min(slice.length - 1, Math.max(0, Math.round(ratio * (slice.length - 1))));
     setHoverIdx(idx);
   };
 
+  const stopDrag = () => {
+    dragRef.current.active = false;
+  };
+
+  const primaryStroke = dark ? "#00D2FF" : "#0284C7";
+  const ma20Stroke = dark ? "#818CF8" : "#4338CA";
+  const ma50Stroke = dark ? "#F59E0B" : "#D97706";
+  const posCol = dark ? "#10B981" : "#047857";
+  const negCol = dark ? "#F43F5E" : "#BE123C";
+
   return (
     <div className="space-y-2.5">
+      {/* Zoom & Pan Control Toolbar */}
+      <div
+        className="flex flex-wrap items-center justify-between gap-2"
+        style={{ fontFamily: MONO, fontSize: 10.5 }}
+      >
+        <div className="flex flex-wrap items-center gap-1.5">
+          <span style={{ color: "var(--mut)", fontWeight: 700, marginRight: 4 }}>
+            KHUNG NHÌN ({clampedWin} PHIÊN):
+          </span>
+          {[
+            { label: "30P", val: 30 },
+            { label: "45P", val: 45 },
+            { label: "60P", val: 60 },
+            { label: `90P (TOÀN BỘ)`, val: totalLen },
+          ].map((btn) => {
+            const isAct = clampedWin === btn.val;
+            return (
+              <button
+                key={btn.label}
+                onClick={() => setPresetWindow(btn.val)}
+                style={{
+                  fontFamily: MONO,
+                  fontSize: 10,
+                  fontWeight: 700,
+                  padding: "3px 9px",
+                  borderRadius: 5,
+                  border: `1px solid ${isAct ? "var(--g)" : "var(--bd-mid)"}`,
+                  background: isAct ? "var(--g)" : "var(--surf2)",
+                  color: isAct ? "var(--g-contrast)" : "var(--ink)",
+                  cursor: "pointer",
+                }}
+              >
+                {btn.label}
+              </button>
+            );
+          })}
+          <button
+            onClick={() => zoomBy(-12)}
+            disabled={clampedWin <= 15}
+            title="Phóng to (Zoom In)"
+            style={{
+              fontFamily: MONO,
+              fontSize: 10.5,
+              fontWeight: 800,
+              padding: "3px 8px",
+              borderRadius: 5,
+              border: "1px solid var(--bd-mid)",
+              background: "var(--surf2)",
+              color: "var(--ink)",
+              cursor: clampedWin <= 15 ? "not-allowed" : "pointer",
+              opacity: clampedWin <= 15 ? 0.45 : 1,
+            }}
+          >
+            + PHÓNG TO
+          </button>
+          <button
+            onClick={() => zoomBy(12)}
+            disabled={clampedWin >= totalLen}
+            title="Thu nhỏ (Zoom Out)"
+            style={{
+              fontFamily: MONO,
+              fontSize: 10.5,
+              fontWeight: 800,
+              padding: "3px 8px",
+              borderRadius: 5,
+              border: "1px solid var(--bd-mid)",
+              background: "var(--surf2)",
+              color: "var(--ink)",
+              cursor: clampedWin >= totalLen ? "not-allowed" : "pointer",
+              opacity: clampedWin >= totalLen ? 0.45 : 1,
+            }}
+          >
+            - THU NHỎ
+          </button>
+        </div>
+
+        {/* Pan Slider when zoomed in */}
+        {clampedWin < totalLen ? (
+          <div className="flex items-center gap-2">
+            <span style={{ color: "var(--g)", fontWeight: 700, fontSize: 10 }}>
+              KÉO TRƯỢT THỜI GIAN:
+            </span>
+            <input
+              type="range"
+              min={0}
+              max={Math.max(1, totalLen - clampedWin)}
+              value={clampedStart}
+              onChange={(e) => setStartIdx(Number(e.target.value))}
+              className="w-28 accent-[var(--g)] cursor-pointer"
+            />
+          </div>
+        ) : (
+          <span style={{ color: "var(--mut)", fontSize: 10 }}>
+            💡 LĂN CHUỘT TRÊN ĐỒ THỊ ĐỂ PHÓNG TO / KÉO TRÁI-PHẢI ĐỂ TRƯỢT
+          </span>
+        )}
+      </div>
+
       {/* Live Hover HUD Bar */}
       <div
         className="salx-sub"
@@ -289,13 +451,16 @@ function VnindexChart({ data, dark }: { data: VnindexPoint[]; dark: boolean }) {
         }}
       >
         <div className="flex flex-wrap items-center gap-3">
-          <span style={{ color: "var(--g)", fontWeight: 700 }}>[{activePt.date}]</span>
+          <span style={{ color: "var(--g)", fontWeight: 800 }}>[{activePt.date}]</span>
           <span>
             VNINDEX:{" "}
             <strong style={{ color: "var(--ink)", fontSize: 13 }}>
-              {activePt.close.toLocaleString("vi-VN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+              {activePt.close.toLocaleString("vi-VN", {
+                minimumFractionDigits: 2,
+                maximumFractionDigits: 2,
+              })}
             </strong>{" "}
-            <span style={{ color: chgPct >= 0 ? "var(--g)" : "var(--avax)", fontWeight: 700 }}>
+            <span style={{ color: chgPct >= 0 ? "var(--pos)" : "var(--avax)", fontWeight: 700 }}>
               ({chgPct >= 0 ? "+" : ""}
               {chgPct.toFixed(2)}%)
             </span>
@@ -311,21 +476,30 @@ function VnindexChart({ data, dark }: { data: VnindexPoint[]; dark: boolean }) {
             </span>
           )}
         </div>
-        <div style={{ color: "var(--mut)", fontSize: 10.5 }}>
-          KL: <strong style={{ color: "var(--ink)" }}>{((activePt.volume || 0) / 1e6).toFixed(1)}M CP</strong> • RÊ CHUỘT ĐỂ TRA CỨU
+        <div style={{ color: "var(--mut)", fontSize: 10.5, fontWeight: 600 }}>
+          KL: <strong style={{ color: "var(--ink)" }}>{((activePt.volume || 0) / 1e6).toFixed(1)}M CP</strong> •{" "}
+          {slice[0]?.date} → {slice[slice.length - 1]?.date}
         </div>
       </div>
 
       <svg
         viewBox={`0 0 ${w} ${h}`}
-        className="w-full h-auto select-none cursor-crosshair"
+        className={`w-full h-auto select-none ${
+          clampedWin < totalLen ? "cursor-grab active:cursor-grabbing" : "cursor-crosshair"
+        }`}
+        onWheel={handleWheel}
+        onMouseDown={handleMouseDown}
         onMouseMove={handleMouseMove}
-        onMouseLeave={() => setHoverIdx(null)}
+        onMouseUp={stopDrag}
+        onMouseLeave={() => {
+          stopDrag();
+          setHoverIdx(null);
+        }}
       >
         <defs>
           <linearGradient id="salxVniGrad" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stopColor="#00E5A3" stopOpacity={dark ? 0.30 : 0.20} />
-            <stop offset="100%" stopColor="#00E5A3" stopOpacity={0.0} />
+            <stop offset="0%" stopColor={primaryStroke} stopOpacity={dark ? 0.30 : 0.22} />
+            <stop offset="100%" stopColor={primaryStroke} stopOpacity={0.0} />
           </linearGradient>
         </defs>
 
@@ -336,44 +510,47 @@ function VnindexChart({ data, dark }: { data: VnindexPoint[]; dark: boolean }) {
               x2={w - padR}
               y1={yAt(tv)}
               y2={yAt(tv)}
-              stroke={dark ? "rgba(148,163,184,0.14)" : "rgba(15,23,42,0.10)"}
+              stroke={dark ? "rgba(148,163,184,0.16)" : "rgba(15,23,42,0.14)"}
               strokeDasharray="3 3"
             />
             <text
               x={padL - 6}
               y={yAt(tv) + 4}
               textAnchor="end"
-              fontSize="10"
+              fontSize="10.5"
+              fontWeight="600"
               fontFamily={MONO}
-              fill={dark ? "#94a3b8" : "#64748b"}
+              fill={dark ? "#A3B8CC" : "#334155"}
             >
               {tv.toFixed(0)}
             </text>
           </g>
         ))}
 
-        {data.map((d, i) => {
+        {slice.map((d, i) => {
           const bh = ((d.volume || 0) / maxV) * 48;
-          const prev = i > 0 ? data[i - 1].close : d.close;
+          const gIdx = clampedStart + i;
+          const prev = gIdx > 0 ? data[gIdx - 1].close : d.close;
           const up = d.close >= prev;
           const isHovered = i === activeIdx;
+          const barW = Math.max(3, Math.min(10, (w - padL - padR) / slice.length - 2));
           return (
             <rect
               key={d.date}
-              x={xAt(i) - 2}
+              x={xAt(i) - barW / 2}
               y={h - padB - bh}
-              width={4}
+              width={barW}
               height={Math.max(1, bh)}
-              fill={up ? "#00E5A3" : "#E84142"}
-              opacity={isHovered ? 0.85 : 0.25}
+              fill={up ? posCol : negCol}
+              opacity={isHovered ? 0.9 : dark ? 0.32 : 0.42}
             />
           );
         })}
 
         <path d={areaPath} fill="url(#salxVniGrad)" />
-        <path d={ma50Path} fill="none" stroke="#F59E0B" strokeWidth="1.6" strokeDasharray="4 3" />
-        <path d={ma20Path} fill="none" stroke="#38BDF8" strokeWidth="1.8" />
-        <path d={closePath} fill="none" stroke="#00E5A3" strokeWidth="2.4" />
+        <path d={ma50Path} fill="none" stroke={ma50Stroke} strokeWidth="1.8" strokeDasharray="4 3" />
+        <path d={ma20Path} fill="none" stroke={ma20Stroke} strokeWidth="2.0" />
+        <path d={closePath} fill="none" stroke={primaryStroke} strokeWidth="2.5" />
 
         {/* Crosshair */}
         <line
@@ -381,8 +558,8 @@ function VnindexChart({ data, dark }: { data: VnindexPoint[]; dark: boolean }) {
           x2={xAt(activeIdx)}
           y1={padT}
           y2={h - padB}
-          stroke="#00E5A3"
-          strokeWidth="1.1"
+          stroke={primaryStroke}
+          strokeWidth="1.2"
           strokeDasharray="3 3"
         />
         <line
@@ -390,46 +567,60 @@ function VnindexChart({ data, dark }: { data: VnindexPoint[]; dark: boolean }) {
           x2={w - padR}
           y1={yAt(activePt.close)}
           y2={yAt(activePt.close)}
-          stroke={dark ? "#475569" : "#94a3b8"}
+          stroke={dark ? "#64748b" : "#475569"}
           strokeWidth="0.9"
           strokeDasharray="2 3"
         />
 
         {activePt.ma50 !== null && (
-          <circle cx={xAt(activeIdx)} cy={yAt(activePt.ma50)} r="3.5" fill="#F59E0B" />
+          <circle cx={xAt(activeIdx)} cy={yAt(activePt.ma50)} r="3.5" fill={ma50Stroke} />
         )}
         {activePt.ma20 !== null && (
-          <circle cx={xAt(activeIdx)} cy={yAt(activePt.ma20)} r="3.5" fill="#38BDF8" />
+          <circle cx={xAt(activeIdx)} cy={yAt(activePt.ma20)} r="3.5" fill={ma20Stroke} />
         )}
         <circle
           cx={xAt(activeIdx)}
           cy={yAt(activePt.close)}
           r="5"
-          fill="#00E5A3"
-          stroke="#050A14"
+          fill={primaryStroke}
+          stroke={dark ? "#050914" : "#FFFFFF"}
           strokeWidth="2"
         />
 
         {/* Floating Price Tag */}
         <g
-          transform={`translate(${Math.min(w - 170, Math.max(padL + 6, xAt(activeIdx) + 8))}, ${Math.max(
+          transform={`translate(${Math.min(w - 174, Math.max(padL + 6, xAt(activeIdx) + 8))}, ${Math.max(
             padT + 4,
             Math.min(h - padB - 48, yAt(activePt.close) - 22)
           )})`}
         >
           <rect
-            width="156"
+            width="162"
             height="42"
             rx="6"
-            fill={dark ? "#0B1324" : "#FFFFFF"}
-            stroke="#00E5A3"
-            strokeWidth="1"
-            opacity="0.96"
+            fill={dark ? "#0A1224" : "#FFFFFF"}
+            stroke={primaryStroke}
+            strokeWidth="1.3"
+            opacity="0.97"
           />
-          <text x="8" y="15" fontSize="10" fontFamily={MONO} fontWeight="700" fill={dark ? "#F1F5F9" : "#0F172A"}>
+          <text
+            x="8"
+            y="15"
+            fontSize="10"
+            fontFamily={MONO}
+            fontWeight="800"
+            fill={dark ? "#F8FAFC" : "#0F172A"}
+          >
             {activePt.date} • {activePt.close.toFixed(2)}
           </text>
-          <text x="8" y="31" fontSize="9.5" fontFamily={MONO} fill={dark ? "#94A3B8" : "#475569"}>
+          <text
+            x="8"
+            y="31"
+            fontSize="9.5"
+            fontFamily={MONO}
+            fontWeight="600"
+            fill={dark ? "#A3B8CC" : "#334155"}
+          >
             MA20: {activePt.ma20?.toFixed(1) ?? "-"} | MA50: {activePt.ma50?.toFixed(1) ?? "-"}
           </text>
         </g>
@@ -439,12 +630,13 @@ function VnindexChart({ data, dark }: { data: VnindexPoint[]; dark: boolean }) {
             key={idx}
             x={xAt(idx)}
             y={h - 10}
-            textAnchor={idx === 0 ? "start" : idx === data.length - 1 ? "end" : "middle"}
-            fontSize="10"
+            textAnchor={idx === 0 ? "start" : idx === slice.length - 1 ? "end" : "middle"}
+            fontSize="10.5"
+            fontWeight="600"
             fontFamily={MONO}
-            fill={dark ? "#94a3b8" : "#64748b"}
+            fill={dark ? "#A3B8CC" : "#334155"}
           >
-            {data[idx]?.date}
+            {slice[idx]?.date}
           </text>
         ))}
       </svg>
@@ -491,7 +683,7 @@ function StockMiniChart({
   });
 
   const isUp = closes[closes.length - 1] >= closes[0];
-  const strokeCol = isUp ? "#00E5A3" : "#E84142";
+  const strokeCol = isUp ? (dark ? "#00D2FF" : "#0284C7") : (dark ? "#F43F5E" : "#BE123C");
 
   const activeIdx = hoverIdx !== null ? hoverIdx : closes.length - 1;
   const activeClose = closes[activeIdx];
@@ -674,8 +866,8 @@ function ReturnDistChart({
               width={Math.max(2, bw)}
               height={Math.max(2, bh)}
               rx={2}
-              fill={isTail ? "#E84142" : "#00E5A3"}
-              opacity={isHov ? 1.0 : isTail ? 0.85 : 0.55}
+              fill={isTail ? (dark ? "#F43F5E" : "#BE123C") : (dark ? "#00D2FF" : "#0284C7")}
+              opacity={isHov ? 1.0 : isTail ? 0.88 : dark ? 0.65 : 0.75}
               className="cursor-pointer"
               onMouseEnter={() => setHoverBin(i)}
               onMouseLeave={() => setHoverBin(null)}
@@ -742,6 +934,10 @@ export default function HomePage() {
   const [obSymbol, setObSymbol] = useState<string>("HPG");
   const [obAmount, setObAmount] = useState<number>(200_000_000);
   const [obSide, setObSide] = useState<"buy" | "sell">("buy");
+
+  // Interactive Pillar Explanation & Sector Hover Popup state
+  const [openPillarInfo, setOpenPillarInfo] = useState<number | null>(null);
+  const [hoveredSector, setHoveredSector] = useState<string | null>(null);
 
   const fetchLatestBundle = async () => {
     setRefreshing(true);
@@ -1261,7 +1457,7 @@ export default function HomePage() {
                   }}
                   style={{
                     background: "var(--g)",
-                    color: "#05120d",
+                    color: "var(--g-contrast)",
                     border: "none",
                     borderRadius: 5,
                     padding: "3px 9px",
@@ -1337,92 +1533,285 @@ export default function HomePage() {
 
                 <div className="mt-4 grid gap-3 sm:grid-cols-3">
                   {[
-                    { title: "01 / XU HƯỚNG THỊ TRƯỜNG", desc: regime.trend_status },
-                    { title: "02 / ĐỘ LAN TỎA DÒNG TIỀN", desc: regime.breadth_status },
-                    { title: "03 / THANH KHOẢN & KHỐI NGOẠI", desc: regime.liquidity_status },
-                  ].map((p) => (
-                    <div key={p.title} className="salx-sub p-3">
-                      <div style={{ fontFamily: MONO, fontSize: 9.5, fontWeight: 700, color: "var(--g)" }}>
-                        {p.title}
+                    {
+                      id: 1,
+                      title: "01 / XU HƯỚNG THỊ TRƯỜNG",
+                      desc: regime.trend_status,
+                      explainTitle: "Phương pháp đo lường Xu hướng (Trend Pillar)",
+                      explainFormula: "VNINDEX Close so với MA20 & MA50 + Độ dốc ΔMA20 (5 phiên)",
+                      explainDetail: `So sánh chỉ số VNINDEX (${regime.vnindex_close.toLocaleString("vi-VN")}) với đường trung bình động ngắn hạn MA20 (${regime.ma20}) và trung hạn MA50 (${regime.ma50}). Khi giá nằm trên cả 2 đường và MA20 hướng lên, trụ cột Xu hướng đạt điểm thuận lợi (+1); khi nằm dưới cả hai đường thì phát tín hiệu phòng thủ.`,
+                    },
+                    {
+                      id: 2,
+                      title: "02 / ĐỘ LAN TỎA DÒNG TIỀN",
+                      desc: regime.breadth_status,
+                      explainTitle: "Phương pháp đo lường Độ rộng & Độ lan tỏa (Breadth Pillar)",
+                      explainFormula: "Tỷ lệ A/D Toàn sàn HOSE + % Cổ phiếu nằm trên MA20",
+                      explainDetail: `Kết hợp độ rộng toàn sàn HOSE (${bundle.breadth_counts?.advances ?? "--"} mã tăng / ${bundle.breadth_counts?.declines ?? "--"} mã giảm, A/D = ${regime.ad_ratio.toFixed(2)}x) với tỷ lệ mã trong rổ thanh khoản giữ được xu hướng trên MA20 (${(regime.pct_above_ma20 * 100).toFixed(0)}%). Giúp phát hiện sớm hiện tượng "xanh vỏ đỏ lòng" hoặc phân hóa ngầm.`,
+                    },
+                    {
+                      id: 3,
+                      title: "03 / THANH KHOẢN & KHỐI NGOẠI",
+                      desc: regime.liquidity_status,
+                      explainTitle: "Phương pháp đo lường Nhịp Thanh khoản (Liquidity & Flow Pillar)",
+                      explainFormula: "Volume Pace = Khối lượng phiên / Trung bình 20 phiên (MA20 Vol)",
+                      explainDetail: `Đo lường cường độ dòng tiền qua hệ số Volume Pace hiện tại (${regime.volume_pace.toFixed(2)}x so với bình quân 20 phiên). Thanh khoản duy trì từ 0.90x–1.35x đi kèm giá tăng xác nhận dòng tiền nâng đỡ bền vững; thanh khoản đột biến khi giá thủng hỗ trợ cảnh báo áp lực phân phối.`,
+                    },
+                  ].map((p) => {
+                    const isOpen = openPillarInfo === p.id;
+                    return (
+                      <div
+                        key={p.id}
+                        className="salx-sub p-3 transition-all"
+                        style={{
+                          borderColor: isOpen ? "var(--g)" : "var(--bd-soft)",
+                          boxShadow: isOpen ? "0 8px 24px rgba(0, 210, 255, 0.12)" : "none",
+                        }}
+                      >
+                        <div className="flex items-center justify-between gap-2">
+                          <div style={{ fontFamily: MONO, fontSize: 9.5, fontWeight: 800, color: "var(--g)" }}>
+                            {p.title}
+                          </div>
+                          <button
+                            onClick={() => setOpenPillarInfo(isOpen ? null : p.id)}
+                            title="Ấn để xem giải thích công thức & ý nghĩa định lượng"
+                            style={{
+                              display: "inline-flex",
+                              alignItems: "center",
+                              gap: 3,
+                              fontFamily: MONO,
+                              fontSize: 9,
+                              fontWeight: 700,
+                              padding: "2px 7px",
+                              borderRadius: 99,
+                              border: `1px solid ${isOpen ? "var(--g)" : "var(--bd-mid)"}`,
+                              background: isOpen ? "var(--g)" : "var(--surf)",
+                              color: isOpen ? "var(--g-contrast)" : "var(--g)",
+                              cursor: "pointer",
+                            }}
+                          >
+                            <HelpCircle className="h-3 w-3" />
+                            {isOpen ? "ĐÓNG" : "GIẢI THÍCH"}
+                          </button>
+                        </div>
+                        <div style={{ marginTop: 6, fontSize: 12.5, fontWeight: 700, color: "var(--ink)" }}>
+                          {p.desc}
+                        </div>
+
+                        {isOpen && (
+                          <div
+                            className="mt-2.5 pt-2.5 text-xs space-y-1.5"
+                            style={{ borderTop: "1px dashed var(--bd-mid)" }}
+                          >
+                            <div style={{ fontFamily: MONO, fontSize: 10, fontWeight: 700, color: "var(--cyan)" }}>
+                              {p.explainTitle}
+                            </div>
+                            <div
+                              style={{
+                                fontFamily: MONO,
+                                fontSize: 9.5,
+                                padding: "4px 7px",
+                                borderRadius: 5,
+                                background: "var(--surf)",
+                                border: "1px solid var(--bd-soft)",
+                                color: "var(--ink)",
+                              }}
+                            >
+                              Công thức: {p.explainFormula}
+                            </div>
+                            <p style={{ margin: 0, fontSize: 11.5, color: "var(--mut)", lineHeight: 1.5 }}>
+                              {p.explainDetail}
+                            </p>
+                          </div>
+                        )}
                       </div>
-                      <div style={{ marginTop: 4, fontSize: 12.5, fontWeight: 600 }}>{p.desc}</div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               </div>
 
               <div className="salx-card p-5 lg:col-span-5">
                 <SectionLabel
                   right={
-                    <span style={{ fontFamily: MONO, fontSize: 9.5, color: "var(--g)" }}>
-                      BẤM VÀO NGÀNH ĐỂ LỌC ↗
+                    <span style={{ fontFamily: MONO, fontSize: 9.5, color: "var(--g)", fontWeight: 700 }}>
+                      RÊ CHUỘT XEM CHI TIẾT • BẤM ĐỂ LỌC ↗
                     </span>
                   }
                 >
-                  BẢN ĐỒ LUÂN CHUYỂN SỨC MẠNH NGÀNH
+                  BẢNG XẾP HẠNG NHÓM NGÀNH
                 </SectionLabel>
 
                 <div className="space-y-3">
-                  {(bundle.sector_summary || []).map((sec) => (
-                    <div
-                      key={sec.sector}
-                      onClick={() => {
-                        setSectorFilter(sec.sector);
-                        setActiveTab("discovery");
-                      }}
-                      className="salx-sub p-3 cursor-pointer transition hover:border-[var(--g)]"
-                    >
-                      <div className="flex items-center justify-between text-xs">
-                        <span style={{ fontWeight: 700, color: "var(--ink)" }}>
-                          {vnSectorName(sec.sector)}{" "}
-                          <span style={{ color: "var(--mut)", fontWeight: 500 }}>({sec.stock_count} mã)</span>
-                        </span>
-                        <span style={{ fontFamily: MONO, fontWeight: 700, color: "var(--g)" }}>
-                          ĐIỂM ALPHA TB: {sec.avg_alpha_score}
-                        </span>
-                      </div>
+                  {(bundle.sector_summary || []).map((sec, sIdx) => {
+                    const isHov = hoveredSector === sec.sector;
+                    const topStocksInSector = bundle.discovery
+                      .filter((d) => d.sector === sec.sector)
+                      .slice(0, 3);
+                    return (
                       <div
-                        style={{
-                          marginTop: 6,
-                          height: 6,
-                          borderRadius: 99,
-                          background: "var(--bd)",
-                          overflow: "hidden",
+                        key={sec.sector}
+                        onMouseEnter={() => setHoveredSector(sec.sector)}
+                        onMouseLeave={() => setHoveredSector(null)}
+                        onClick={() => {
+                          setSectorFilter(sec.sector);
+                          setActiveTab("discovery");
                         }}
+                        className="salx-sub sector-rank-item p-3 cursor-pointer"
                       >
+                        <div className="flex items-center justify-between text-xs">
+                          <span style={{ fontWeight: 700, color: "var(--ink)" }}>
+                            <span
+                              style={{
+                                fontFamily: MONO,
+                                fontSize: 10,
+                                color: "var(--g)",
+                                marginRight: 6,
+                              }}
+                            >
+                              #{sIdx + 1}
+                            </span>
+                            {vnSectorName(sec.sector)}{" "}
+                            <span style={{ color: "var(--mut)", fontWeight: 600 }}>({sec.stock_count} mã)</span>
+                          </span>
+                          <span style={{ fontFamily: MONO, fontWeight: 800, color: "var(--g)" }}>
+                            ĐIỂM ALPHA TB: {sec.avg_alpha_score}
+                          </span>
+                        </div>
                         <div
                           style={{
-                            height: "100%",
-                            width: `${Math.min(100, sec.avg_alpha_score)}%`,
-                            background: "linear-gradient(90deg, var(--g), var(--cyan))",
+                            marginTop: 6,
+                            height: 6,
                             borderRadius: 99,
+                            background: "var(--bd)",
+                            overflow: "hidden",
                           }}
-                        />
+                        >
+                          <div
+                            style={{
+                              height: "100%",
+                              width: `${Math.min(100, sec.avg_alpha_score)}%`,
+                              background: "linear-gradient(90deg, var(--g), var(--cyan))",
+                              borderRadius: 99,
+                            }}
+                          />
+                        </div>
+                        <div
+                          style={{
+                            marginTop: 6,
+                            display: "flex",
+                            justifyContent: "space-between",
+                            fontFamily: MONO,
+                            fontSize: 10.5,
+                            color: "var(--mut)",
+                          }}
+                        >
+                          <span>TRÊN MA20: <strong style={{ color: "var(--ink)" }}>{sec.pct_above_ma20}%</strong></span>
+                          <span>
+                            SM GIÁ 20P:{" "}
+                            <strong style={{ color: sec.avg_rs_20d_pct >= 0 ? "var(--pos)" : "var(--avax)" }}>
+                              {sec.avg_rs_20d_pct >= 0 ? "+" : ""}
+                              {sec.avg_rs_20d_pct}%
+                            </strong>
+                          </span>
+                          <span>
+                            DẪN ĐẦU: <strong style={{ color: "var(--ink)" }}>{sec.top_symbol}</strong> ({sec.top_score})
+                          </span>
+                        </div>
+
+                        {/* Hover Popup Card */}
+                        {isHov && (
+                          <div
+                            className="mt-2.5 pt-2.5 text-xs salx-fade-up"
+                            style={{
+                              borderTop: "1px solid var(--gd)",
+                              background: "var(--surf)",
+                              margin: "10px -4px -4px",
+                              padding: "10px 12px",
+                              borderRadius: 8,
+                              border: "1px solid var(--gd)",
+                              boxShadow: "0 10px 28px rgba(0, 0, 0, 0.22)",
+                            }}
+                          >
+                            <div
+                              style={{
+                                display: "flex",
+                                justifyContent: "space-between",
+                                alignItems: "center",
+                                fontFamily: MONO,
+                                fontSize: 9.5,
+                                fontWeight: 800,
+                                color: "var(--g)",
+                                marginBottom: 6,
+                              }}
+                            >
+                              <span>⚡ CHI TIẾT XUNG LỰC NGÀNH {vnSectorName(sec.sector).toUpperCase()}</span>
+                              <span>HẠNG #{sIdx + 1}/{bundle.sector_summary?.length || 8}</span>
+                            </div>
+
+                            <div className="space-y-1.5">
+                              {topStocksInSector.map((st) => (
+                                <div
+                                  key={st.symbol}
+                                  style={{
+                                    display: "flex",
+                                    justifyContent: "space-between",
+                                    alignItems: "center",
+                                    fontFamily: MONO,
+                                    fontSize: 10.5,
+                                    padding: "3px 6px",
+                                    borderRadius: 5,
+                                    background: "var(--surf2)",
+                                  }}
+                                >
+                                  <span>
+                                    <strong style={{ color: "var(--ink)" }}>{st.symbol}</strong>{" "}
+                                    <span style={{ color: "var(--mut)" }}>
+                                      ({st.close_price.toLocaleString("vi-VN")} đ)
+                                    </span>
+                                  </span>
+                                  <span>
+                                    RS 20p:{" "}
+                                    <strong
+                                      style={{ color: st.rs_20d >= 0 ? "var(--pos)" : "var(--avax)" }}
+                                    >
+                                      {st.rs_20d >= 0 ? "+" : ""}
+                                      {(st.rs_20d * 100).toFixed(1)}%
+                                    </strong>{" "}
+                                    • Alpha: <strong style={{ color: "var(--g)" }}>{st.alpha_score}</strong>
+                                  </span>
+                                </div>
+                              ))}
+                            </div>
+
+                            <div
+                              style={{
+                                marginTop: 6,
+                                fontFamily: MONO,
+                                fontSize: 9.5,
+                                color: "var(--mut)",
+                                display: "flex",
+                                justifyContent: "space-between",
+                              }}
+                            >
+                              <span>
+                                Trạng thái:{" "}
+                                <strong style={{ color: "var(--ink)" }}>
+                                  {sec.avg_alpha_score >= 55
+                                    ? "Dòng tiền dẫn dắt"
+                                    : sec.avg_alpha_score >= 45
+                                    ? "Phân hóa tích lũy"
+                                    : "Suy yếu ngắn hạn"}
+                                </strong>
+                              </span>
+                              <span style={{ color: "var(--g)", fontWeight: 700 }}>
+                                Nhấn để mở bảng lọc ngành →
+                              </span>
+                            </div>
+                          </div>
+                        )}
                       </div>
-                      <div
-                        style={{
-                          marginTop: 6,
-                          display: "flex",
-                          justifyContent: "space-between",
-                          fontFamily: MONO,
-                          fontSize: 10.5,
-                          color: "var(--mut)",
-                        }}
-                      >
-                        <span>TRÊN MA20: {sec.pct_above_ma20}%</span>
-                        <span>
-                          SM GIÁ 20P:{" "}
-                          <strong style={{ color: sec.avg_rs_20d_pct >= 0 ? "var(--g)" : "var(--avax)" }}>
-                            {sec.avg_rs_20d_pct >= 0 ? "+" : ""}
-                            {sec.avg_rs_20d_pct}%
-                          </strong>
-                        </span>
-                        <span>
-                          DẪN ĐẦU: <strong style={{ color: "var(--ink)" }}>{sec.top_symbol}</strong> ({sec.top_score})
-                        </span>
-                      </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               </div>
             </div>
@@ -1451,7 +1840,7 @@ export default function HomePage() {
                         border: "1px solid var(--bd)",
                         cursor: "pointer",
                         background: viewMode === m ? "var(--g)" : "var(--surf2)",
-                        color: viewMode === m ? "#05120d" : "var(--mut)",
+                        color: viewMode === m ? "var(--g-contrast)" : "var(--mut)",
                         fontWeight: 700,
                       }}
                     >
@@ -1627,7 +2016,7 @@ export default function HomePage() {
                                   padding: "2px 8px",
                                   borderRadius: 5,
                                   background: "var(--g)",
-                                  color: "#05120d",
+                                  color: "var(--g-contrast)",
                                   fontWeight: 800,
                                 }}
                               >
@@ -1765,10 +2154,10 @@ export default function HomePage() {
                       </span>
                     </div>
                     {[
-                      { label: "1. Xu hướng & Động lượng giá (35%)", val: selectedStock.trend_score, col: "#00E5A3" },
-                      { label: "2. Thanh khoản & Chất lượng sổ lệnh (25%)", val: selectedStock.liquidity_score, col: "#38BDF8" },
+                      { label: "1. Xu hướng & Động lượng giá (35%)", val: selectedStock.trend_score, col: "var(--g)" },
+                      { label: "2. Thanh khoản & Chất lượng sổ lệnh (25%)", val: selectedStock.liquidity_score, col: "var(--cyan)" },
                       { label: "3. Dòng tiền Khối ngoại (15%)", val: selectedStock.foreign_score, col: "#A855F7" },
-                      { label: "4. Chất lượng Cơ bản Doanh nghiệp (25%)", val: selectedStock.fundamental_score, col: "#F59E0B" },
+                      { label: "4. Chất lượng Cơ bản Doanh nghiệp (25%)", val: selectedStock.fundamental_score, col: "var(--org)" },
                     ].map((c) => (
                       <div key={c.label}>
                         <div className="mb-1 flex justify-between">
@@ -1844,7 +2233,7 @@ export default function HomePage() {
                         padding: "9px 12px",
                         borderRadius: 8,
                         background: "var(--g)",
-                        color: "#05120d",
+                        color: "var(--g-contrast)",
                         border: "none",
                         cursor: "pointer",
                       }}
@@ -2061,7 +2450,7 @@ export default function HomePage() {
                     fontSize: 10.5,
                     fontWeight: 700,
                     background: "var(--g)",
-                    color: "#05120d",
+                    color: "var(--g-contrast)",
                     border: "none",
                     borderRadius: 6,
                     padding: "7px 14px",
@@ -2174,7 +2563,7 @@ export default function HomePage() {
                           borderRadius: 6,
                           border: "1px solid var(--bd)",
                           background: whatIfAmount === amt ? "var(--g)" : "var(--surf2)",
-                          color: whatIfAmount === amt ? "#05120d" : "var(--mut)",
+                          color: whatIfAmount === amt ? "var(--g-contrast)" : "var(--mut)",
                           cursor: "pointer",
                         }}
                       >
@@ -2285,7 +2674,7 @@ export default function HomePage() {
                         fontSize: 10,
                         fontWeight: 700,
                         background: "var(--g)",
-                        color: "#05120d",
+                        color: "var(--g-contrast)",
                         border: "none",
                         borderRadius: 6,
                         padding: "7px 12px",
@@ -2497,7 +2886,7 @@ export default function HomePage() {
                         borderRadius: 5,
                         border: "1px solid var(--bd)",
                         background: obAmount === v ? "var(--g)" : "var(--surf2)",
-                        color: obAmount === v ? "#05120d" : "var(--mut)",
+                        color: obAmount === v ? "var(--g-contrast)" : "var(--mut)",
                         cursor: "pointer",
                       }}
                     >

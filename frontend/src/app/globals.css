@@ -1,59 +1,76 @@
 @import "tailwindcss";
 
 /* ===================================================================
-   PORI × SALX Design Tokens — Dark Default (#050A14 Midnight Tech)
+   PORI Quant Terminal Tokens — High-Contrast Electric Cyan & Royal Indigo
+   Tuned for crystal-clear legibility in BOTH Dark Mode and Light Mode
 =================================================================== */
 :root {
-  --bg: #050A14;
-  --surf: #0B1324;
-  --surf2: #121D33;
-  --ink: #F1F5F9;
-  --mut: #94A3B8;
-  --faint: #64748B;
-  --g: #00E5A3;
-  --g-text: #00E5A3;
-  --gd: rgba(0, 229, 163, 0.24);
-  --gb: rgba(0, 229, 163, 0.09);
-  --cyan: #38BDF8;
-  --avax: #E84142;
-  --avax-bg: rgba(232, 65, 66, 0.12);
-  --avax-bd: rgba(232, 65, 66, 0.35);
-  --bd: rgba(148, 163, 184, 0.16);
-  --bd2: rgba(148, 163, 184, 0.28);
-  --bd-soft: rgba(148, 163, 184, 0.10);
-  --bd-mid: rgba(148, 163, 184, 0.18);
-  --bd-str: rgba(148, 163, 184, 0.26);
-  --hdr: rgba(5, 10, 20, 0.86);
+  --bg: #050914;
+  --surf: #0A1224;
+  --surf2: #111D36;
+  --ink: #F8FAFC;
+  --mut: #A3B8CC;
+  --faint: #7890A8;
+  /* Primary Brand Accent: Electric Cyan */
+  --g: #00D2FF;
+  --g-text: #00D2FF;
+  --g-contrast: #03111A;
+  --gd: rgba(0, 210, 255, 0.34);
+  --gb: rgba(0, 210, 255, 0.11);
+  /* Secondary Accent: Royal Indigo / Violet */
+  --cyan: #818CF8;
+  --indigo: #6366F1;
+  --indigo-bg: rgba(99, 102, 241, 0.14);
+  --indigo-bd: rgba(99, 102, 241, 0.36);
+  /* Semantic Positive & Negative */
+  --pos: #10B981;
+  --avax: #F43F5E;
+  --avax-bg: rgba(244, 63, 94, 0.14);
+  --avax-bd: rgba(244, 63, 94, 0.38);
+  --bd: rgba(148, 163, 184, 0.20);
+  --bd2: rgba(148, 163, 184, 0.32);
+  --bd-soft: rgba(148, 163, 184, 0.13);
+  --bd-mid: rgba(148, 163, 184, 0.22);
+  --bd-str: rgba(148, 163, 184, 0.32);
+  --hdr: rgba(5, 9, 20, 0.88);
   --org: #F59E0B;
   --gold: #FBBF24;
   --font-display: "Be Vietnam Pro", sans-serif;
   --font-body: "Inter", sans-serif;
   --font-mono: "JetBrains Mono", monospace;
-  --hero-glow: 0 0 36px rgba(0, 229, 163, 0.25);
+  --hero-glow: 0 0 36px rgba(0, 210, 255, 0.26);
 }
 
 [data-theme="light"] {
-  --bg: #F8FAFC;
+  --bg: #F1F5F9;
   --surf: #FFFFFF;
-  --surf2: #EEF2F7;
+  --surf2: #E2E8F0;
   --ink: #0F172A;
-  --mut: #475569;
-  --faint: #64748B;
-  --g: #059669;
-  --g-text: #047857;
-  --gd: rgba(5, 150, 105, 0.22);
-  --gb: rgba(5, 150, 105, 0.08);
-  --cyan: #0284C7;
-  --avax: #DC2626;
-  --avax-bg: rgba(220, 38, 38, 0.09);
-  --avax-bd: rgba(220, 38, 38, 0.28);
-  --bd: rgba(15, 23, 42, 0.12);
-  --bd2: rgba(15, 23, 42, 0.22);
-  --bd-soft: rgba(15, 23, 42, 0.08);
-  --bd-mid: rgba(15, 23, 42, 0.13);
-  --bd-str: rgba(15, 23, 42, 0.20);
-  --hdr: rgba(248, 250, 252, 0.88);
-  --hero-glow: 0 0 28px rgba(5, 150, 105, 0.14);
+  --mut: #334155;
+  --faint: #475569;
+  /* High-contrast Deep Ocean Cyan & Royal Indigo for Daylight */
+  --g: #0284C7;
+  --g-text: #0369A1;
+  --g-contrast: #FFFFFF;
+  --gd: rgba(2, 132, 199, 0.34);
+  --gb: rgba(2, 132, 199, 0.11);
+  --cyan: #4338CA;
+  --indigo: #4F46E5;
+  --indigo-bg: rgba(79, 70, 229, 0.11);
+  --indigo-bd: rgba(79, 70, 229, 0.32);
+  --pos: #047857;
+  --avax: #BE123C;
+  --avax-bg: rgba(190, 18, 60, 0.10);
+  --avax-bd: rgba(190, 18, 60, 0.32);
+  --bd: rgba(15, 23, 42, 0.16);
+  --bd2: rgba(15, 23, 42, 0.26);
+  --bd-soft: rgba(15, 23, 42, 0.11);
+  --bd-mid: rgba(15, 23, 42, 0.18);
+  --bd-str: rgba(15, 23, 42, 0.26);
+  --hdr: rgba(255, 255, 255, 0.92);
+  --org: #B45309;
+  --gold: #B45309;
+  --hero-glow: 0 0 28px rgba(2, 132, 199, 0.18);
 }
 
 * {
@@ -83,15 +100,15 @@ body {
   font-variant-numeric: tabular-nums;
 }
 
-/* Cursor-reactive interactive spotlight + tech grid (from SALX) */
+/* Cursor-reactive interactive spotlight + tech grid */
 .cursor-ambient-glow {
   position: fixed;
   inset: 0;
   pointer-events: none;
   z-index: 0;
   background:
-    radial-gradient(560px circle at var(--mx, 50%) var(--my, 30%), rgba(0, 229, 163, 0.15), rgba(56, 189, 248, 0.08) 38%, transparent 68%),
-    radial-gradient(460px circle at calc(100% - var(--mx, 50%)) calc(100% - var(--my, 30%)), rgba(232, 65, 66, 0.07), transparent 60%);
+    radial-gradient(580px circle at var(--mx, 50%) var(--my, 30%), rgba(0, 210, 255, 0.15), rgba(99, 102, 241, 0.10) 40%, transparent 68%),
+    radial-gradient(480px circle at calc(100% - var(--mx, 50%)) calc(100% - var(--my, 30%)), rgba(129, 140, 248, 0.08), transparent 60%);
   transition: opacity 0.25s ease;
 }
 
@@ -101,8 +118,8 @@ body {
   pointer-events: none;
   z-index: 0;
   background-image:
-    linear-gradient(to right, rgba(56, 189, 248, 0.11) 1px, transparent 1px),
-    linear-gradient(to bottom, rgba(0, 229, 163, 0.11) 1px, transparent 1px);
+    linear-gradient(to right, rgba(0, 210, 255, 0.12) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(99, 102, 241, 0.12) 1px, transparent 1px);
   background-size: 44px 44px;
   -webkit-mask-image: radial-gradient(380px circle at var(--mx, 50%) var(--my, 30%), rgba(0, 0, 0, 0.95), transparent 78%);
   mask-image: radial-gradient(380px circle at var(--mx, 50%) var(--my, 30%), rgba(0, 0, 0, 0.95), transparent 78%);
@@ -110,17 +127,17 @@ body {
 
 [data-theme="light"] .cursor-ambient-glow {
   background:
-    radial-gradient(560px circle at var(--mx, 50%) var(--my, 30%), rgba(5, 150, 105, 0.11), rgba(2, 132, 199, 0.06) 38%, transparent 68%),
-    radial-gradient(460px circle at calc(100% - var(--mx, 50%)) calc(100% - var(--my, 30%)), rgba(220, 38, 38, 0.05), transparent 60%);
+    radial-gradient(560px circle at var(--mx, 50%) var(--my, 30%), rgba(2, 132, 199, 0.13), rgba(79, 70, 229, 0.08) 38%, transparent 68%),
+    radial-gradient(460px circle at calc(100% - var(--mx, 50%)) calc(100% - var(--my, 30%)), rgba(79, 70, 229, 0.06), transparent 60%);
 }
 
 [data-theme="light"] .cursor-ambient-grid {
   background-image:
-    linear-gradient(to right, rgba(2, 132, 199, 0.09) 1px, transparent 1px),
-    linear-gradient(to bottom, rgba(5, 150, 105, 0.09) 1px, transparent 1px);
+    linear-gradient(to right, rgba(2, 132, 199, 0.12) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(79, 70, 229, 0.12) 1px, transparent 1px);
 }
 
-/* SALX Header */
+/* Sticky Header */
 .app-hdr {
   min-height: 64px;
   display: grid;
@@ -128,7 +145,7 @@ body {
   align-items: center;
   gap: 18px;
   padding: 10px 32px;
-  border-bottom: 1px solid rgba(0, 229, 163, 0.18);
+  border-bottom: 1px solid var(--gd);
   background: var(--hdr);
   -webkit-backdrop-filter: blur(16px);
   backdrop-filter: blur(16px);
@@ -164,30 +181,44 @@ body {
   }
 }
 
-/* SALX Surface Cards & Hover Lift */
+/* Surface Cards & Hover Lift */
 .salx-card {
   background: var(--surf);
   border: 1px solid var(--bd-mid);
   border-radius: 12px;
+  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.06);
   transition: transform 0.18s ease, border-color 0.18s ease, box-shadow 0.18s ease;
 }
 
 .salx-card--interactive:hover {
   transform: translateY(-2px);
   border-color: var(--gd);
-  box-shadow: 0 14px 38px rgba(0, 229, 163, 0.07);
+  box-shadow: 0 14px 38px rgba(0, 210, 255, 0.12);
 }
 
 .salx-sub {
   background: var(--surf2);
   border: 1px solid var(--bd-soft);
   border-radius: 10px;
+  transition: transform 0.18s ease, border-color 0.18s ease, box-shadow 0.18s ease;
+}
+
+.sector-rank-item {
+  position: relative;
+  transition: transform 0.2s cubic-bezier(0.16, 1, 0.3, 1), border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.sector-rank-item:hover {
+  transform: translateY(-3px) scale(1.012);
+  border-color: var(--g);
+  box-shadow: 0 14px 32px rgba(2, 132, 199, 0.18);
+  z-index: 30;
 }
 
 @keyframes fadeUp {
   from {
     opacity: 0;
-    transform: translateY(12px);
+    transform: translateY(8px);
   }
   to {
     opacity: 1;
@@ -196,7 +227,7 @@ body {
 }
 
 .salx-fade-up {
-  animation: fadeUp 0.35s ease both;
+  animation: fadeUp 0.25s ease both;
 }
 
 ::-webkit-scrollbar {
@@ -207,9 +238,9 @@ body {
   background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: rgba(148, 163, 184, 0.3);
+  background: rgba(148, 163, 184, 0.35);
   border-radius: 9999px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: rgba(0, 229, 163, 0.5);
+  background: var(--g);
 }
