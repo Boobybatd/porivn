@@ -1,14 +1,81 @@
 @import "tailwindcss";
 
+/* ===================================================================
+   PORI × SALX Design Tokens — Dark Default (#050A14 Midnight Tech)
+=================================================================== */
 :root {
-  --font-sans: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  --bg: #050A14;
+  --surf: #0B1324;
+  --surf2: #121D33;
+  --ink: #F1F5F9;
+  --mut: #94A3B8;
+  --faint: #64748B;
+  --g: #00E5A3;
+  --g-text: #00E5A3;
+  --gd: rgba(0, 229, 163, 0.24);
+  --gb: rgba(0, 229, 163, 0.09);
+  --cyan: #38BDF8;
+  --avax: #E84142;
+  --avax-bg: rgba(232, 65, 66, 0.12);
+  --avax-bd: rgba(232, 65, 66, 0.35);
+  --bd: rgba(148, 163, 184, 0.16);
+  --bd2: rgba(148, 163, 184, 0.28);
+  --bd-soft: rgba(148, 163, 184, 0.10);
+  --bd-mid: rgba(148, 163, 184, 0.18);
+  --bd-str: rgba(148, 163, 184, 0.26);
+  --hdr: rgba(5, 10, 20, 0.86);
+  --org: #F59E0B;
+  --gold: #FBBF24;
+  --font-display: "Be Vietnam Pro", sans-serif;
+  --font-body: "Inter", sans-serif;
+  --font-mono: "JetBrains Mono", monospace;
+  --hero-glow: 0 0 36px rgba(0, 229, 163, 0.25);
+}
+
+[data-theme="light"] {
+  --bg: #F8FAFC;
+  --surf: #FFFFFF;
+  --surf2: #EEF2F7;
+  --ink: #0F172A;
+  --mut: #475569;
+  --faint: #64748B;
+  --g: #059669;
+  --g-text: #047857;
+  --gd: rgba(5, 150, 105, 0.22);
+  --gb: rgba(5, 150, 105, 0.08);
+  --cyan: #0284C7;
+  --avax: #DC2626;
+  --avax-bg: rgba(220, 38, 38, 0.09);
+  --avax-bd: rgba(220, 38, 38, 0.28);
+  --bd: rgba(15, 23, 42, 0.12);
+  --bd2: rgba(15, 23, 42, 0.22);
+  --bd-soft: rgba(15, 23, 42, 0.08);
+  --bd-mid: rgba(15, 23, 42, 0.13);
+  --bd-str: rgba(15, 23, 42, 0.20);
+  --hdr: rgba(248, 250, 252, 0.88);
+  --hero-glow: 0 0 28px rgba(5, 150, 105, 0.14);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  scroll-behavior: smooth;
+  font-size: 16px;
 }
 
 body {
-  font-family: var(--font-sans);
   margin: 0;
-  padding: 0;
+  min-width: 320px;
+  min-height: 100vh;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--font-body);
+  font-size: 14px;
+  line-height: 1.55;
+  transition: background 0.2s, color 0.2s;
+  overflow-x: hidden;
 }
 
 .font-mono-num {
@@ -16,7 +83,122 @@ body {
   font-variant-numeric: tabular-nums;
 }
 
-/* Custom sleek scrollbar */
+/* Cursor-reactive interactive spotlight + tech grid (from SALX) */
+.cursor-ambient-glow {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+  background:
+    radial-gradient(560px circle at var(--mx, 50%) var(--my, 30%), rgba(0, 229, 163, 0.15), rgba(56, 189, 248, 0.08) 38%, transparent 68%),
+    radial-gradient(460px circle at calc(100% - var(--mx, 50%)) calc(100% - var(--my, 30%)), rgba(232, 65, 66, 0.07), transparent 60%);
+  transition: opacity 0.25s ease;
+}
+
+.cursor-ambient-grid {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+  background-image:
+    linear-gradient(to right, rgba(56, 189, 248, 0.11) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(0, 229, 163, 0.11) 1px, transparent 1px);
+  background-size: 44px 44px;
+  -webkit-mask-image: radial-gradient(380px circle at var(--mx, 50%) var(--my, 30%), rgba(0, 0, 0, 0.95), transparent 78%);
+  mask-image: radial-gradient(380px circle at var(--mx, 50%) var(--my, 30%), rgba(0, 0, 0, 0.95), transparent 78%);
+}
+
+[data-theme="light"] .cursor-ambient-glow {
+  background:
+    radial-gradient(560px circle at var(--mx, 50%) var(--my, 30%), rgba(5, 150, 105, 0.11), rgba(2, 132, 199, 0.06) 38%, transparent 68%),
+    radial-gradient(460px circle at calc(100% - var(--mx, 50%)) calc(100% - var(--my, 30%)), rgba(220, 38, 38, 0.05), transparent 60%);
+}
+
+[data-theme="light"] .cursor-ambient-grid {
+  background-image:
+    linear-gradient(to right, rgba(2, 132, 199, 0.09) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(5, 150, 105, 0.09) 1px, transparent 1px);
+}
+
+/* SALX Header */
+.app-hdr {
+  min-height: 64px;
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 18px;
+  padding: 10px 32px;
+  border-bottom: 1px solid rgba(0, 229, 163, 0.18);
+  background: var(--hdr);
+  -webkit-backdrop-filter: blur(16px);
+  backdrop-filter: blur(16px);
+  position: sticky;
+  top: 0;
+  z-index: 40;
+}
+
+.app-hdr-nav {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 22px;
+  flex-wrap: wrap;
+}
+
+.app-hdr-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+@media (max-width: 1120px) {
+  .app-hdr {
+    grid-template-columns: 1fr;
+    padding: 12px 18px;
+    gap: 10px;
+  }
+  .app-hdr-nav {
+    justify-content: flex-start;
+    gap: 14px;
+  }
+}
+
+/* SALX Surface Cards & Hover Lift */
+.salx-card {
+  background: var(--surf);
+  border: 1px solid var(--bd-mid);
+  border-radius: 12px;
+  transition: transform 0.18s ease, border-color 0.18s ease, box-shadow 0.18s ease;
+}
+
+.salx-card--interactive:hover {
+  transform: translateY(-2px);
+  border-color: var(--gd);
+  box-shadow: 0 14px 38px rgba(0, 229, 163, 0.07);
+}
+
+.salx-sub {
+  background: var(--surf2);
+  border: 1px solid var(--bd-soft);
+  border-radius: 10px;
+}
+
+@keyframes fadeUp {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.salx-fade-up {
+  animation: fadeUp 0.35s ease both;
+}
+
 ::-webkit-scrollbar {
   width: 6px;
   height: 6px;
@@ -25,9 +207,9 @@ body {
   background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: rgba(148, 163, 184, 0.35);
+  background: rgba(148, 163, 184, 0.3);
   border-radius: 9999px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: rgba(148, 163, 184, 0.6);
+  background: rgba(0, 229, 163, 0.5);
 }
