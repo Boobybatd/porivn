@@ -73,7 +73,7 @@ export interface PortfolioHealth {
   hist_var_95_pct: number;
   hist_var_95_vnd: number;
   hist_es_95_pct: number;
-  hist_es_95_vnd: float;
+  hist_es_95_vnd: number;
   param_var_95_pct: number;
   annualized_vol_pct: number;
   health_score: number;
@@ -83,12 +83,12 @@ export interface PortfolioHealth {
   stress_tests: Record<string, number>;
   warnings: string[];
   daily_returns_series?: number[];
+  component_risk_pct?: Record<string, number>;
 }
-
-type float = number;
 
 export interface WhatIfResult {
   candidate_symbol: string;
+  candidate_sector?: string;
   add_amount_vnd: number;
   nav_before: number;
   nav_after: number;
@@ -96,12 +96,20 @@ export interface WhatIfResult {
   var_95_after_vnd: number;
   delta_var_vnd: number;
   delta_var_pct: number;
+  es_95_before_vnd?: number;
+  es_95_after_vnd?: number;
+  delta_es_vnd?: number;
   hhi_stock_before: number;
   hhi_stock_after: number;
   delta_hhi_stock: number;
   hhi_sector_before: number;
   hhi_sector_after: number;
+  sector_weight_before?: number;
+  sector_weight_after?: number;
   avg_corr_with_portfolio: number;
+  pairwise_corr?: Record<string, number>;
+  candidate_dtl_days?: number;
+  liquidity_feasible?: boolean;
   portfolio_fit_score: number;
   explanation: string;
 }
@@ -149,6 +157,7 @@ export interface SnapshotBundle {
   };
   validation: {
     signal_validation: Array<{
+      group?: string;
       horizon_days: number;
       sample_count: number;
       avg_excess_return_pct: number;

@@ -101,6 +101,27 @@ export function computeClientPortfolioHealth(
   const paramVar95Pct = Math.max(0, 1.64485 * sigmaDaily - meanRet);
   const annVolPct = sigmaDaily * Math.sqrt(252);
 
+  // Marginal / Component Risk Contribution (% of portfolio variance contributed by each stock)
+  const componentRiskPct: Record<string, number> = {};
+  if (variance > 0) {
+    let totalComp = 0;
+    const rawComp: Record<string, number> = {};
+    syms.forEach((s) => {
+      const sArr = returnsMap[s];
+      const sMean = sArr.reduce((a, b) => a + b, 0) / nSessions;
+      let covWithPort = 0;
+      for (let t = 0; t < nSessions; t++) {
+        covWithPort += (sArr[t] - sMean) * (portRet[t] - meanRet);
+      }
+      covWithPort /= Math.max(1, nSessions - 1);
+      rawComp[s] = Math.max(0, wNav[s] * covWithPort);
+      totalComp += rawComp[s];
+    });
+    syms.forEach((s) => {
+      componentRiskPct[s] = totalComp > 0 ? Number(((rawComp[s] / totalComp) * 100).toFixed(1)) : 0;
+    });
+  }
+
   // Beta vs VNINDEX
   let portBeta = 1.0;
   const mkt = returnsMap["VNINDEX"];
@@ -136,10 +157,17 @@ export function computeClientPortfolioHealth(
     }
   });
 
+  // Multi-dimensional Stress Tests (Market Beta + Sector Shocks + Correlation Spike)
+  const topSectorEntry = Object.entries(sectorWeights).sort((a, b) => b[1] - a[1])[0];
+  const topSectorName = topSectorEntry ? topSectorEntry[0] : "Banking";
+  const topSectorVal = topSectorEntry ? topSectorEntry[1] * equityVal : 0;
+
   const stressTests: Record<string, number> = {
-    "VNINDEX -3%": Math.round(-0.03 * portBeta * totalNav),
-    "VNINDEX -5%": Math.round(-0.05 * portBeta * totalNav),
-    "VNINDEX -7%": Math.round(-0.07 * portBeta * totalNav),
+    "VNINDEX -3% (Beta)": Math.round(-0.03 * portBeta * totalNav),
+    "VNINDEX -5% (Beta)": Math.round(-0.05 * portBeta * totalNav),
+    "VNINDEX -7% (Bán tháo)": Math.round(-0.07 * portBeta * totalNav),
+    [`Cú sốc ngành ${topSectorName} (-7%)`]: Math.round(-0.07 * topSectorVal - 0.02 * (equityVal - topSectorVal)),
+    "Khủng hoảng Tương quan (ρ → 1.0)": Math.round(-histEs95Pct * 1.35 * totalNav),
   };
 
   const warnings: string[] = [];
@@ -148,10 +176,9 @@ export function computeClientPortfolioHealth(
       `Độ tập trung cổ phiếu cao (HHI=${hhiStock.toFixed(2)}, N hiệu dụng=${nEffStock.toFixed(1)} mã).`
     );
   }
-  const topSec = Object.entries(sectorWeights).sort((a, b) => b[1] - a[1])[0];
-  if (topSec && topSec[1] > 0.45) {
+  if (topSectorEntry && topSectorEntry[1] > 0.45) {
     warnings.push(
-      `Tập trung ngành ${topSec[0]} chiếm ${(topSec[1] * 100).toFixed(0)}% tỷ trọng cổ phiếu.`
+      `Tập trung ngành ${topSectorEntry[0]} chiếm ${(topSectorEntry[1] * 100).toFixed(0)}% tỷ trọng cổ phiếu.`
     );
   }
   if (histVar95Pct > 0.03) {
@@ -196,6 +223,7 @@ export function computeClientPortfolioHealth(
     stress_tests: stressTests,
     warnings,
     daily_returns_series: portRet,
+    component_risk_pct: componentRiskPct,
   };
 }
 
@@ -221,14 +249,29 @@ export function computeClientWhatIf(
     .map((s) => s.toUpperCase())
     .filter((s) => positions[s] > 0 && returnsMap[s] && s !== sym);
 
+  const pairwiseCorr: Record<string, number> = {};
   let avgCorr = 1.0;
   if (existingSyms.length > 0) {
-    const corrs = existingSyms.map((s) => pearsonCorr(returnsMap[s], returnsMap[sym]));
+    const corrs = existingSyms.map((s) => {
+      const c = pearsonCorr(returnsMap[s], returnsMap[sym]);
+      pairwiseCorr[s] = Number(c.toFixed(2));
+      return c;
+    });
     avgCorr = corrs.reduce((a, b) => a + b, 0) / corrs.length;
   }
 
+  const sec = discoveryMap[sym]?.sector || "Other";
+  const secBefore = Number(((before.sector_weights[sec] || 0) * 100).toFixed(1));
+  const secAfter = Number(((after.sector_weights[sec] || 0) * 100).toFixed(1));
+
+  const adv20Val = discoveryMap[sym]?.adv_20_val || 0;
+  const totalCandidatePos = (positions[sym] || 0) + addAmountVnd;
+  const candidateDtl = adv20Val > 0 ? Number((totalCandidatePos / (adv20Val * 0.1)).toFixed(2)) : 0.5;
+  const liqFeasible = candidateDtl <= 1.0;
+
   const deltaVarVnd = after.hist_var_95_vnd - before.hist_var_95_vnd;
   const deltaVarPct = after.hist_var_95_pct - before.hist_var_95_pct;
+  const deltaEsVnd = after.hist_es_95_vnd - before.hist_es_95_vnd;
   const deltaHhiStock = after.hhi_stock - before.hhi_stock;
 
   const corrComp = Math.max(0, Math.min(100, (1 - avgCorr) * 100));
@@ -236,12 +279,12 @@ export function computeClientWhatIf(
   const hhiComp = Math.max(0, Math.min(100, 50 - (deltaHhiStock / 0.05) * 25));
   const fitScore = Number((0.45 * varComp + 0.35 * corrComp + 0.2 * hhiComp).toFixed(1));
 
-  const varDir = deltaVarVnd <= 0 ? "giảm" : "tăng";
+  const varDir = deltaVarPct <= 0 ? "giảm tỷ lệ rủi ro" : "tăng tỷ lệ rủi ro";
   const hhiDir = deltaHhiStock <= 0 ? "giảm tập trung" : "tăng tập trung";
-  const sec = discoveryMap[sym]?.sector || "N/A";
 
   return {
     candidate_symbol: sym,
+    candidate_sector: sec,
     add_amount_vnd: Math.round(addAmountVnd),
     nav_before: before.total_nav_vnd,
     nav_after: after.total_nav_vnd,
@@ -249,20 +292,26 @@ export function computeClientWhatIf(
     var_95_after_vnd: after.hist_var_95_vnd,
     delta_var_vnd: Math.round(deltaVarVnd),
     delta_var_pct: Number(deltaVarPct.toFixed(5)),
+    es_95_before_vnd: before.hist_es_95_vnd,
+    es_95_after_vnd: after.hist_es_95_vnd,
+    delta_es_vnd: Math.round(deltaEsVnd),
     hhi_stock_before: before.hhi_stock,
     hhi_stock_after: after.hhi_stock,
     delta_hhi_stock: Number(deltaHhiStock.toFixed(4)),
     hhi_sector_before: before.hhi_sector,
     hhi_sector_after: after.hhi_sector,
+    sector_weight_before: secBefore,
+    sector_weight_after: secAfter,
     avg_corr_with_portfolio: Number(avgCorr.toFixed(3)),
+    pairwise_corr: pairwiseCorr,
+    candidate_dtl_days: candidateDtl,
+    liquidity_feasible: liqFeasible,
     portfolio_fit_score: fitScore,
-    explanation: `Thêm ${addAmountVnd.toLocaleString("vi-VN")} đ vào ${sym} (${sec}): VaR 95% (% NAV) từ ${(
+    explanation: `Thêm ${addAmountVnd.toLocaleString("vi-VN")} đ vào ${sym} (${sec}): Tỷ trọng ngành ${sec} từ ${secBefore}% → ${secAfter}%; VaR 95% (% NAV) từ ${(
       before.hist_var_95_pct * 100
-    ).toFixed(2)}% → ${(after.hist_var_95_pct * 100).toFixed(2)}% (${varDir} ${Math.abs(
-      deltaVarVnd
-    ).toLocaleString("vi-VN")} đ), HHI cổ phiếu ${hhiDir} (${before.hhi_stock.toFixed(
+    ).toFixed(2)}% → ${(after.hist_var_95_pct * 100).toFixed(2)}% (${varDir}), HHI mã ${hhiDir} (${before.hhi_stock.toFixed(
       3
-    )} → ${after.hhi_stock.toFixed(3)}), tương quan TB = ${avgCorr.toFixed(2)}.`,
+    )} → ${after.hhi_stock.toFixed(3)}), tương quan TB = ${avgCorr.toFixed(2)}, thanh khoản thoát vị thế DTL = ${candidateDtl} phiên.`,
   };
 }
 
@@ -341,7 +390,7 @@ export function evaluateClientOrderBook(
         ? ((avgPrice - midPrice) / midPrice) * 100
         : ((midPrice - avgPrice) / midPrice) * 100
       : 0;
-  const feeTaxPct = side === "buy" ? 0.15 : 0.25; // 0.15% brokerage fee + 0.10% sell tax
+  const feeTaxPct = side === "buy" ? 0.15 : 0.25;
 
   const note = sufficient
     ? `Đủ độ sâu 3 bước giá để khớp toàn bộ ${orderValueVnd.toLocaleString("vi-VN")} đ. Tách riêng Market Impact (${Math.max(
