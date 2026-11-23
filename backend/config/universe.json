@@ -1,0 +1,14 @@
+{
+  "description": "Discovery Universe: 55 liquid HOSE stocks across major sectors for VN Alpha Radar MVP",
+  "indices": ["VNINDEX", "VN30"],
+  "sectors": {
+    "Banking": ["VCB", "BID", "CTG", "TCB", "MBB", "VPB", "ACB", "STB", "HDB", "TPB", "VIB", "LPB"],
+    "Securities": ["SSI", "VND", "HCM", "VCI", "FTS", "BSI", "MBS"],
+    "RealEstate": ["VHM", "VIC", "VRE", "KDH", "NLG", "DXG", "PDR", "DIG", "KBC"],
+    "Materials_Steel": ["HPG", "HSG", "NKG", "DGC", "DCM", "DPM"],
+    "Retail_Consumer": ["MWG", "PNJ", "FRT", "MSN", "VNM", "SAB", "DGW"],
+    "Technology_Telecom": ["FPT", "CMG"],
+    "Oil_Gas_Energy": ["GAS", "PVD", "PVS", "PLX", "POW", "REE", "PC1"],
+    "Industrial_Logistics": ["GMD", "HAH", "VJC", "VTP", "CTD"]
+  }
+}
