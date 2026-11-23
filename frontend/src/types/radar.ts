@@ -15,17 +15,41 @@ export interface MarketRegime {
   summary: string;
 }
 
+export interface VnindexPoint {
+  date: string;
+  close: number;
+  ma20: number | null;
+  ma50: number | null;
+  volume: number;
+}
+
+export interface SectorSummaryItem {
+  sector: string;
+  stock_count: number;
+  avg_alpha_score: number;
+  pct_above_ma20: number;
+  avg_rs_20d_pct: number;
+  top_symbol: string;
+  top_score: number;
+}
+
 export interface DiscoveryStock {
   symbol: string;
   sector: string;
   close_price: number;
+  ma20?: number;
+  ma50?: number;
   pct_change_1d: number;
+  ret_5d_pct?: number;
+  ret_20d_pct?: number;
   rs_20d: number;
   above_ma20: number;
+  above_ma50?: number;
   adv_20_val: number;
   adv_20_vol: number;
   volume_pace: number;
   obi_3l: number | null;
+  spread_pct?: number | null;
   foreign_net_ratio: number | null;
   alpha_score: number | null;
   trend_score: number | null;
@@ -49,7 +73,7 @@ export interface PortfolioHealth {
   hist_var_95_pct: number;
   hist_var_95_vnd: number;
   hist_es_95_pct: number;
-  hist_es_95_vnd: number;
+  hist_es_95_vnd: float;
   param_var_95_pct: number;
   annualized_vol_pct: number;
   health_score: number;
@@ -58,7 +82,10 @@ export interface PortfolioHealth {
   days_to_liquidate: Record<string, number>;
   stress_tests: Record<string, number>;
   warnings: string[];
+  daily_returns_series?: number[];
 }
+
+type float = number;
 
 export interface WhatIfResult {
   candidate_symbol: string;
@@ -79,19 +106,46 @@ export interface WhatIfResult {
   explanation: string;
 }
 
+export interface OrderBookSnapshot {
+  source: string;
+  bid_prices: number[];
+  bid_vols: number[];
+  ask_prices: number[];
+  ask_vols: number[];
+}
+
+export interface StockSeriesItem {
+  dates_60d: string[];
+  closes_60d: number[];
+  ma20_60d: (number | null)[];
+  orderbook: OrderBookSnapshot;
+}
+
 export interface SnapshotBundle {
   generated_at: string;
   data_mode: string;
   latest_trading_date: string;
   sessions_count: number;
   breadth_scope: string;
+  breadth_counts?: {
+    advances: number;
+    declines: number;
+    no_change: number;
+  };
   market_regime: MarketRegime;
+  vnindex_history?: VnindexPoint[];
+  sector_summary?: SectorSummaryItem[];
   discovery: DiscoveryStock[];
   default_portfolio: {
     positions: Record<string, number>;
     cash_vnd: number;
     health: PortfolioHealth;
     what_if_50m: Record<string, WhatIfResult>;
+  };
+  quant_client_data?: {
+    dates_130d: string[];
+    returns_130d: Record<string, number[]>;
+    stock_series: Record<string, StockSeriesItem>;
   };
   validation: {
     signal_validation: Array<{
