@@ -1,4 +1,4 @@
-# Pori — Portfolio-Aware Market & Risk Cockpit
+# Pori - Portfolio-Aware Market & Risk Cockpit
 
 **Pori** (*Portfolio + Risk*) là hệ thống phân tích bối cảnh thị trường, tầm soát cổ phiếu tiềm năng gắn với quản trị rủi ro danh mục cá nhân trên nền tảng **VPBankS NEO API** và **SSI FastConnect API v3**.
 
