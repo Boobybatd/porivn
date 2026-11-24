@@ -1,0 +1,46 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none">
+  <defs>
+    <linearGradient id="poriBg" x1="0" y1="0" x2="64" y2="64" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#0A162D" />
+      <stop offset="100%" stop-color="#050914" />
+    </linearGradient>
+    <linearGradient id="poriCyanIndigo" x1="12" y1="10" x2="52" y2="54" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#00D2FF" />
+      <stop offset="55%" stop-color="#38BDF8" />
+      <stop offset="100%" stop-color="#6366F1" />
+    </linearGradient>
+    <linearGradient id="poriPulse" x1="25" y1="45" x2="50" y2="24" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#818CF8" />
+      <stop offset="100%" stop-color="#00D2FF" />
+    </linearGradient>
+  </defs>
+
+  <!-- Outer Quant Shield Squircle -->
+  <rect x="3" y="3" width="58" height="58" rx="15" fill="url(#poriBg)" stroke="url(#poriCyanIndigo)" stroke-width="2.5" />
+
+  <!-- Subtle Quantitative Grid Cross -->
+  <line x1="12" y1="32" x2="52" y2="32" stroke="#00D2FF" stroke-opacity="0.12" stroke-width="1" stroke-dasharray="2 3" />
+  <line x1="32" y1="12" x2="32" y2="52" stroke="#6366F1" stroke-opacity="0.12" stroke-width="1" stroke-dasharray="2 3" />
+
+  <!-- Stylized 'P' Vertical Pillar (Capital & Stability) -->
+  <rect x="17" y="16" width="6.5" height="32" rx="3.25" fill="url(#poriCyanIndigo)" />
+
+  <!-- Stylized 'P' Quant Loop / Protective Arc -->
+  <path
+    d="M 22.5 19.25 H 35.5 C 42.2 19.25 46.5 23.1 46.5 28.1 C 46.5 33.1 42.2 36.8 35.5 36.8 H 27.5"
+    stroke="url(#poriCyanIndigo)"
+    stroke-width="5.2"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+  />
+
+  <!-- Rising Alpha Momentum Pulse + Lock-on Node -->
+  <path
+    d="M 28.5 46 L 34.5 40.5 L 39 43.2 L 46.8 33.5"
+    stroke="url(#poriPulse)"
+    stroke-width="3"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+  />
+  <circle cx="47" cy="33.2" r="3.2" fill="#00D2FF" />
+</svg>

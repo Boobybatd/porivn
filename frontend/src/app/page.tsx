@@ -1436,28 +1436,57 @@ export default function HomePage() {
 
       {/* ── SLEEK SINGLE-ROW STICKY HEADER ── */}
       <header className="app-hdr">
-        {/* Col 1 — Brand */}
+        {/* Col 1 — Brand with Custom Vector PORI Logo */}
         <div
           onClick={() => setActiveTab("regime")}
           style={{ display: "flex", alignItems: "center", gap: 9, cursor: "pointer", flexShrink: 0 }}
         >
-          <span
+          <svg
+            width="32"
+            height="32"
+            viewBox="0 0 64 64"
+            fill="none"
+            aria-label="PORI Logo"
             style={{
-              display: "grid",
-              placeItems: "center",
-              width: 28,
-              height: 28,
-              borderRadius: 8,
-              background: "var(--gb)",
-              border: "1px solid var(--gd)",
-              color: "var(--g)",
-              fontFamily: MONO,
-              fontWeight: 800,
-              fontSize: 13,
+              filter: darkMode ? "drop-shadow(0 0 10px rgba(0, 210, 255, 0.25))" : "drop-shadow(0 2px 6px rgba(2, 132, 199, 0.2))",
+              flexShrink: 0,
             }}
           >
-            ◆
-          </span>
+            <defs>
+              <linearGradient id="hdrPoriBg" x1="0" y1="0" x2="64" y2="64" gradientUnits="userSpaceOnUse">
+                <stop offset="0%" stopColor={darkMode ? "#0A162D" : "#0F172A"} />
+                <stop offset="100%" stopColor={darkMode ? "#050914" : "#1E293B"} />
+              </linearGradient>
+              <linearGradient id="hdrPoriGrad" x1="12" y1="10" x2="52" y2="54" gradientUnits="userSpaceOnUse">
+                <stop offset="0%" stopColor="#00D2FF" />
+                <stop offset="55%" stopColor="#38BDF8" />
+                <stop offset="100%" stopColor="#6366F1" />
+              </linearGradient>
+              <linearGradient id="hdrPoriPulse" x1="25" y1="45" x2="50" y2="24" gradientUnits="userSpaceOnUse">
+                <stop offset="0%" stopColor="#818CF8" />
+                <stop offset="100%" stopColor="#00D2FF" />
+              </linearGradient>
+            </defs>
+            <rect x="3" y="3" width="58" height="58" rx="15" fill="url(#hdrPoriBg)" stroke="url(#hdrPoriGrad)" strokeWidth="2.6" />
+            <line x1="12" y1="32" x2="52" y2="32" stroke="#00D2FF" strokeOpacity="0.14" strokeWidth="1" strokeDasharray="2 3" />
+            <line x1="32" y1="12" x2="32" y2="52" stroke="#6366F1" strokeOpacity="0.14" strokeWidth="1" strokeDasharray="2 3" />
+            <rect x="17" y="16" width="6.5" height="32" rx="3.25" fill="url(#hdrPoriGrad)" />
+            <path
+              d="M 22.5 19.25 H 35.5 C 42.2 19.25 46.5 23.1 46.5 28.1 C 46.5 33.1 42.2 36.8 35.5 36.8 H 27.5"
+              stroke="url(#hdrPoriGrad)"
+              strokeWidth="5.2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+            <path
+              d="M 28.5 46 L 34.5 40.5 L 39 43.2 L 46.8 33.5"
+              stroke="url(#hdrPoriPulse)"
+              strokeWidth="3"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+            <circle cx="47" cy="33.2" r="3.2" fill="#00D2FF" />
+          </svg>
           <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
             <span
               style={{
