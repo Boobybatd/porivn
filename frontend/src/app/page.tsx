@@ -2,19 +2,26 @@
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
-  AlertTriangle,
   ArrowUpRight,
   BookOpen,
   CheckCircle2,
-  Database,
   Download,
   HelpCircle,
+  History,
+  LogIn,
+  LogOut,
   Plus,
   RefreshCw,
+  RotateCcw,
+  Save,
+  Scale,
   ShieldAlert,
   Trash2,
   Upload,
+  UserCheck,
+  X,
 } from "lucide-react";
+import type { User } from "@supabase/supabase-js";
 import type {
   DiscoveryStock,
   PortfolioHealth,
@@ -23,11 +30,21 @@ import type {
   WhatIfResult,
 } from "@/types/radar";
 import {
+  computeCapitalAllocationAdvice,
   computeClientPortfolioHealth,
   computeClientWhatIf,
   evaluateClientOrderBook,
   vnSectorName,
 } from "@/lib/quant";
+import {
+  isSupabaseConfigured,
+  loadCloudWorkspace,
+  saveCloudWorkspace,
+  supabase,
+  type SimulationHistoryItem,
+} from "@/lib/supabase";
+
+const LOCAL_WORKSPACE_KEY = "pori_guest_workspace_v1";
 
 type TabId = "regime" | "discovery" | "portfolio" | "orderbook" | "validation";
 
@@ -921,14 +938,31 @@ export default function HomePage() {
   const [viewMode, setViewMode] = useState<"TOP10" | "ALL">("ALL");
   const [selectedStock, setSelectedStock] = useState<DiscoveryStock | null>(null);
 
-  // Portfolio & What-If state
+  // Portfolio, Capital Advisor & What-If state
   const [positions, setPositions] = useState<Record<string, number>>({});
   const [cashVnd, setCashVnd] = useState<number>(100_000_000);
+  const [targetCapitalVnd, setTargetCapitalVnd] = useState<number>(200_000_000);
   const [whatIfSymbol, setWhatIfSymbol] = useState<string>("VND");
   const [whatIfAmount, setWhatIfAmount] = useState<number>(50_000_000);
   const [newPosSym, setNewPosSym] = useState<string>("ACB");
+  const [posInputMode, setPosInputMode] = useState<"SHARES" | "VND">("SHARES");
+  const [newPosShares, setNewPosShares] = useState<number>(2000);
   const [newPosAmt, setNewPosAmt] = useState<number>(100_000_000);
   const [portfolioMsg, setPortfolioMsg] = useState<string | null>(null);
+  const [simulations, setSimulations] = useState<SimulationHistoryItem[]>([]);
+  const [showPoriGuide, setShowPoriGuide] = useState<boolean>(false);
+
+  // Auth & Cloud Persistence state (Guest-first + Email/Password via Supabase)
+  const [authUser, setAuthUser] = useState<User | null>(null);
+  const [authModalOpen, setAuthModalOpen] = useState<boolean>(false);
+  const [authTab, setAuthTab] = useState<"login" | "signup">("login");
+  const [authEmail, setAuthEmail] = useState<string>("");
+  const [authPassword, setAuthPassword] = useState<string>("");
+  const [authBusy, setAuthBusy] = useState<boolean>(false);
+  const [authError, setAuthError] = useState<string | null>(null);
+  const [authSuccess, setAuthSuccess] = useState<string | null>(null);
+  const [cloudSyncState, setCloudSyncState] = useState<"idle" | "saving" | "saved" | "error">("idle");
+  const workspaceInitializedRef = useRef<boolean>(false);
 
   // Orderbook state
   const [obSymbol, setObSymbol] = useState<string>("HPG");
@@ -939,6 +973,28 @@ export default function HomePage() {
   const [openPillarInfo, setOpenPillarInfo] = useState<number | null>(null);
   const [hoveredSector, setHoveredSector] = useState<string | null>(null);
 
+  const pushSimulationLog = (
+    actionType: SimulationHistoryItem["actionType"],
+    summary: string,
+    symbol?: string,
+    amountVnd?: number
+  ) => {
+    const entry: SimulationHistoryItem = {
+      id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+      createdAt: new Date().toLocaleString("vi-VN", {
+        hour: "2-digit",
+        minute: "2-digit",
+        day: "2-digit",
+        month: "2-digit",
+      }),
+      actionType,
+      symbol,
+      amountVnd,
+      summary,
+    };
+    setSimulations((prev) => [entry, ...prev].slice(0, 25));
+  };
+
   const fetchLatestBundle = async () => {
     setRefreshing(true);
     try {
@@ -946,10 +1002,35 @@ export default function HomePage() {
       if (!snapRes.ok) throw new Error("Không tìm thấy dữ liệu snapshot.json");
       const loaded: SnapshotBundle = await snapRes.json();
       setBundle(loaded);
-      if (Object.keys(positions).length === 0) {
-        setPositions(loaded.default_portfolio.positions);
-        setCashVnd(loaded.default_portfolio.cash_vnd);
+
+      if (!workspaceInitializedRef.current) {
+        let restoredFromLocal = false;
+        try {
+          const raw = localStorage.getItem(LOCAL_WORKSPACE_KEY);
+          if (raw) {
+            const parsed = JSON.parse(raw);
+            if (parsed && typeof parsed.positions === "object") {
+              setPositions(parsed.positions);
+              setCashVnd(Number(parsed.cashVnd ?? loaded.default_portfolio.cash_vnd));
+              setTargetCapitalVnd(Number(parsed.targetCapitalVnd ?? 200_000_000));
+              setSimulations(Array.isArray(parsed.simulations) ? parsed.simulations : []);
+              restoredFromLocal = true;
+            }
+          }
+        } catch {
+          // ignore corrupted storage
+        }
+        if (!restoredFromLocal) {
+          setPositions(loaded.default_portfolio.positions);
+          setCashVnd(loaded.default_portfolio.cash_vnd);
+          const defNav =
+            Object.values(loaded.default_portfolio.positions).reduce((a, b) => a + b, 0) +
+            loaded.default_portfolio.cash_vnd;
+          setTargetCapitalVnd(defNav);
+        }
+        workspaceInitializedRef.current = true;
       }
+
       if (!selectedStock && loaded.discovery.length > 0) {
         setSelectedStock(loaded.discovery[0]);
         setWhatIfSymbol(loaded.discovery[0].symbol);
@@ -966,6 +1047,133 @@ export default function HomePage() {
     fetchLatestBundle();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Supabase Email/Password session restore + cloud workspace sync
+  useEffect(() => {
+    if (!supabase) return;
+    let active = true;
+
+    const syncFromCloud = async (user: User) => {
+      const cloud = await loadCloudWorkspace(user.id);
+      if (!active) return;
+      if (cloud) {
+        setPositions(cloud.positions);
+        setCashVnd(cloud.cashVnd);
+        setTargetCapitalVnd(cloud.targetCapitalVnd);
+        setSimulations(cloud.simulations);
+        workspaceInitializedRef.current = true;
+        setCloudSyncState("saved");
+        setPortfolioMsg(`Đã tự động đồng bộ danh mục & lịch sử mô phỏng của ${user.email}.`);
+      } else if (workspaceInitializedRef.current) {
+        setCloudSyncState("saving");
+        const res = await saveCloudWorkspace(user.id, user.email, {
+          positions,
+          cashVnd,
+          targetCapitalVnd,
+          simulations,
+        });
+        if (active) setCloudSyncState(res.ok ? "saved" : "error");
+      }
+    };
+
+    supabase.auth.getSession().then(({ data }) => {
+      if (!active) return;
+      const u = data.session?.user ?? null;
+      setAuthUser(u);
+      if (u) syncFromCloud(u);
+    });
+
+    const { data: sub } = supabase.auth.onAuthStateChange((event, session) => {
+      if (!active) return;
+      const u = session?.user ?? null;
+      setAuthUser(u);
+      if (event === "SIGNED_IN" && u) {
+        syncFromCloud(u);
+      } else if (event === "SIGNED_OUT") {
+        setCloudSyncState("idle");
+      }
+    });
+
+    return () => {
+      active = false;
+      sub.subscription.unsubscribe();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Auto-save to localStorage (for all guests) + debounced save to Supabase (for logged-in users)
+  useEffect(() => {
+    if (!workspaceInitializedRef.current) return;
+    try {
+      localStorage.setItem(
+        LOCAL_WORKSPACE_KEY,
+        JSON.stringify({ positions, cashVnd, targetCapitalVnd, simulations })
+      );
+    } catch {
+      // ignore storage quota errors
+    }
+
+    if (!authUser || !supabase) return;
+    setCloudSyncState("saving");
+    const timer = setTimeout(async () => {
+      const res = await saveCloudWorkspace(authUser.id, authUser.email, {
+        positions,
+        cashVnd,
+        targetCapitalVnd,
+        simulations,
+      });
+      setCloudSyncState(res.ok ? "saved" : "error");
+    }, 850);
+    return () => clearTimeout(timer);
+  }, [positions, cashVnd, targetCapitalVnd, simulations, authUser]);
+
+  const handleAuthSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!supabase) {
+      setAuthError("Chưa gắn biến môi trường Supabase trên Vercel (NEXT_PUBLIC_SUPABASE_URL / ANON_KEY).");
+      return;
+    }
+    setAuthError(null);
+    setAuthSuccess(null);
+    setAuthBusy(true);
+    try {
+      if (authTab === "login") {
+        const { error: err } = await supabase.auth.signInWithPassword({
+          email: authEmail.trim(),
+          password: authPassword,
+        });
+        if (err) throw err;
+        setAuthModalOpen(false);
+        setAuthPassword("");
+      } else {
+        const { data, error: err } = await supabase.auth.signUp({
+          email: authEmail.trim(),
+          password: authPassword,
+        });
+        if (err) throw err;
+        if (data.session) {
+          setAuthModalOpen(false);
+          setAuthPassword("");
+        } else {
+          setAuthSuccess(
+            "Đã tạo tài khoản! Nếu dự án Supabase có bật xác thực email, vui lòng kiểm tra hộp thư để kích hoạt rồi đăng nhập."
+          );
+        }
+      }
+    } catch (err) {
+      setAuthError(err instanceof Error ? err.message : "Đăng nhập thất bại. Vui lòng kiểm tra lại Email/Mật khẩu.");
+    } finally {
+      setAuthBusy(false);
+    }
+  };
+
+  const handleSignOut = async () => {
+    if (!supabase) return;
+    await supabase.auth.signOut();
+    setAuthUser(null);
+    setCloudSyncState("idle");
+    setPortfolioMsg("Đã đăng xuất. Danh mục hiện tại vẫn được giữ tạm trên trình duyệt này.");
+  };
 
   useEffect(() => {
     if (!autoRefresh) return;
@@ -1048,6 +1256,18 @@ export default function HomePage() {
     });
     return best as WhatIfResult | null;
   }, [bundle, portfolioFitBySymbol]);
+
+  const capitalAdvice = useMemo(() => {
+    if (!bundle || !activeHealth) return null;
+    return computeCapitalAllocationAdvice(
+      targetCapitalVnd,
+      positions,
+      activeHealth,
+      bundle.market_regime.regime,
+      bundle.discovery,
+      portfolioFitBySymbol
+    );
+  }, [bundle, activeHealth, targetCapitalVnd, positions, portfolioFitBySymbol]);
 
   const activeOrderBookEval = useMemo(() => {
     const series = bundle?.quant_client_data?.stock_series?.[obSymbol];
@@ -1262,11 +1482,11 @@ export default function HomePage() {
         {/* Col 2 — Centered Mono Uppercase Nav Links */}
         <nav className="app-hdr-nav" aria-label="Main">
           {[
-            { id: "regime", label: "01. Khí Áp & Ngành" },
-            { id: "discovery", label: "02. Tầm Soát Alpha" },
-            { id: "portfolio", label: "03. Danh Mục & Mô Phỏng" },
-            { id: "orderbook", label: "04. Sổ Lệnh 3 Bước" },
-            { id: "validation", label: "05. Kiểm Chứng & Dữ Liệu" },
+            { id: "regime", label: "01. Tổng Quan Thị Trường" },
+            { id: "discovery", label: "02. Bộ Lọc Cổ Phiếu" },
+            { id: "portfolio", label: "03. Quản Trị Danh Mục" },
+            { id: "orderbook", label: "04. Thanh Khoản & Khớp Lệnh" },
+            { id: "validation", label: "05. Hiệu Quả & Dữ Liệu" },
           ].map((tab) => (
             <button
               key={tab.id}
@@ -1278,7 +1498,7 @@ export default function HomePage() {
           ))}
         </nav>
 
-        {/* Col 3 — Status Chips & Theme Toggle */}
+        {/* Col 3 — Status Chips, Auth & Theme Toggle */}
         <div className="app-hdr-actions">
           <span
             style={{
@@ -1308,10 +1528,10 @@ export default function HomePage() {
               color: autoRefresh ? "var(--g)" : "var(--mut)",
             }}
           >
-            AUTO: {autoRefresh ? "BẬT" : "TẮT"}
+            ĐỒNG BỘ: {autoRefresh ? "BẬT" : "TẮT"}
           </button>
 
-          <button onClick={fetchLatestBundle} disabled={refreshing} style={chipBtnStyle} title="Làm mới dữ liệu">
+          <button onClick={fetchLatestBundle} disabled={refreshing} style={chipBtnStyle} title="Làm mới dữ liệu thị trường">
             <span style={{ display: "inline-flex", alignItems: "center", gap: 5 }}>
               <RefreshCw className={`h-3 w-3 ${refreshing ? "animate-spin" : ""}`} />
               {bundle.latest_trading_date}
@@ -1324,6 +1544,63 @@ export default function HomePage() {
           >
             {darkMode ? "SÁNG" : "TỐI"}
           </button>
+
+          {authUser ? (
+            <div className="inline-flex items-center gap-1.5">
+              <span
+                style={{
+                  ...chipBtnStyle,
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 5,
+                  borderColor: "var(--gd)",
+                  background: "var(--gb)",
+                  color: "var(--g)",
+                  cursor: "default",
+                }}
+                title={
+                  cloudSyncState === "saving"
+                    ? "Đang đồng bộ danh mục lên tài khoản..."
+                    : "Đã lưu an toàn vào tài khoản Email của bạn"
+                }
+              >
+                <UserCheck className="h-3 w-3" />
+                {authUser.email?.split("@")[0]}
+                <span style={{ opacity: 0.75, fontSize: 9 }}>
+                  {cloudSyncState === "saving" ? "• ĐANG LƯU" : "• ĐÃ LƯU"}
+                </span>
+              </span>
+              <button
+                onClick={handleSignOut}
+                title="Đăng xuất tài khoản"
+                style={{ ...chipBtnStyle, color: "var(--mut)", padding: "6px 8px" }}
+              >
+                <LogOut className="h-3.5 w-3.5" />
+              </button>
+            </div>
+          ) : (
+            <button
+              onClick={() => {
+                setAuthError(null);
+                setAuthSuccess(null);
+                setAuthModalOpen(true);
+              }}
+              style={{
+                ...chipBtnStyle,
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 5,
+                background: "var(--g)",
+                color: "var(--g-contrast)",
+                borderColor: "var(--g)",
+                fontWeight: 700,
+              }}
+              title="Đăng nhập bằng Email để lưu danh mục & lịch sử mô phỏng cho các lần truy cập sau"
+            >
+              <LogIn className="h-3.5 w-3.5" />
+              ĐĂNG NHẬP LƯU
+            </button>
+          )}
         </div>
       </header>
 
@@ -1338,7 +1615,7 @@ export default function HomePage() {
           padding: "28px clamp(16px, 3vw, 36px) 80px",
         }}
       >
-        {/* EDITORIAL PAGE HEADER + 30s EXECUTIVE STRIP */}
+        {/* EDITORIAL PAGE HEADER + MARKET BRIEF */}
         <div
           style={{
             display: "grid",
@@ -1361,7 +1638,8 @@ export default function HomePage() {
                 color: "var(--g)",
               }}
             >
-              VPBANKS NEO API × SSI FASTCONNECT V3 / {bundle.sessions_count} PHIÊN LỊCH SỬ
+              VPBANKS NEO API × SSI FASTCONNECT V3 / {bundle.sessions_count} PHIÊN DỮ LIỆU •{" "}
+              {authUser ? `TÀI KHOẢN: ${authUser.email}` : "DÙNG THỬ TỰ DO (LƯU TẠM TRÊN MÁY)"}
             </span>
             <h1
               style={{
@@ -1374,15 +1652,15 @@ export default function HomePage() {
                 color: "var(--ink)",
               }}
             >
-              {activeTab === "regime" && "Khí Áp Thị Trường & Luân Chuyển Ngành"}
-              {activeTab === "discovery" && "Tầm Soát Cổ Phiếu Định Lượng & Hồ Sơ 360°"}
-              {activeTab === "portfolio" && "Khám Sức Khỏe Danh Mục & Mô Phỏng Rủi Ro"}
-              {activeTab === "orderbook" && "Thanh Khoản Sổ Lệnh 3 Bước Giá & Chi Phí Khớp"}
-              {activeTab === "validation" && "Kiểm Chứng Mô Hình & Ma Trận Ánh Xạ Dữ Liệu"}
+              {activeTab === "regime" && "Tổng Quan Thị Trường & Luân Chuyển Nhóm Ngành"}
+              {activeTab === "discovery" && "Bộ Lọc Xếp Hạng Cổ Phiếu & Hồ Sơ Chi Tiết"}
+              {activeTab === "portfolio" && "Quản Trị Rủi Ro Danh Mục & Cố Vấn Phân Bổ Vốn"}
+              {activeTab === "orderbook" && "Thanh Khoản Sổ Lệnh 3 Bước Giá & Ước Tính Trượt Giá"}
+              {activeTab === "validation" && "Hiệu Quả Kiểm Định Mô Hình & Dữ Liệu Nguồn"}
             </h1>
           </div>
 
-          {/* 30-Second Quick Summary Banner */}
+          {/* Quick Session Brief Banner */}
           <div
             className="salx-card"
             style={{
@@ -1406,7 +1684,7 @@ export default function HomePage() {
                 marginBottom: 6,
               }}
             >
-              <span>⚡ TÓM TẮT ĐIỀU HÀNH 30 GIÂY ({bundle.latest_trading_date})</span>
+              <span>⚡ NHẬN ĐỊNH NHANH PHIÊN GIAO DỊCH ({bundle.latest_trading_date})</span>
               <span>ĐỒNG THUẬN: {regime.positive_pillars}/3 TRỤ CỘT</span>
             </div>
             <p style={{ margin: 0, fontSize: 12.5, color: "var(--ink)", lineHeight: 1.5 }}>
@@ -1427,7 +1705,7 @@ export default function HomePage() {
               }}
             >
               <span>
-                TOP ALPHA:{" "}
+                TOP ĐIỂM PORI:{" "}
                 {bundle.discovery.slice(0, 3).map((d) => (
                   <button
                     key={d.symbol}
@@ -1467,7 +1745,7 @@ export default function HomePage() {
                     cursor: "pointer",
                   }}
                 >
-                  TƯƠNG THÍCH NHẤT: {bestFitCandidate.candidate_symbol} ({bestFitCandidate.portfolio_fit_score}/100) ↗
+                  PHÙ HỢP DANH MỤC NHẤT: {bestFitCandidate.candidate_symbol} ({bestFitCandidate.portfolio_fit_score}/100) ↗
                 </button>
               )}
             </div>
@@ -1505,7 +1783,7 @@ export default function HomePage() {
                 sub={regime.liquidity_status}
               />
               <StatCard
-                label="ĐIỂM SỨC KHỎE DANH MỤC"
+                label="CHỈ SỐ AN TOÀN DANH MỤC"
                 value={activeHealth.health_score}
                 unit="/ 100"
                 sub={`VaR 95% (1 ngày): -${fmtVnd(activeHealth.hist_var_95_vnd)}`}
@@ -1707,7 +1985,7 @@ export default function HomePage() {
                             <span style={{ color: "var(--mut)", fontWeight: 600 }}>({sec.stock_count} mã)</span>
                           </span>
                           <span style={{ fontFamily: MONO, fontWeight: 800, color: "var(--g)" }}>
-                            ĐIỂM ALPHA TB: {sec.avg_alpha_score}
+                            ĐIỂM PORI TB: {sec.avg_alpha_score}
                           </span>
                         </div>
                         <div
@@ -1809,7 +2087,7 @@ export default function HomePage() {
                                       {st.rs_20d >= 0 ? "+" : ""}
                                       {(st.rs_20d * 100).toFixed(1)}%
                                     </strong>{" "}
-                                    • Alpha: <strong style={{ color: "var(--g)" }}>{st.alpha_score}</strong>
+                                    • Điểm PORI: <strong style={{ color: "var(--g)" }}>{st.alpha_score}</strong>
                                   </span>
                                 </div>
                               ))}
@@ -1856,101 +2134,145 @@ export default function HomePage() {
         {activeTab === "discovery" && (
           <div className="grid gap-5 lg:grid-cols-12">
             <div className="space-y-4 lg:col-span-8">
-              <div className="salx-card p-3.5 flex flex-wrap items-center justify-between gap-3">
-                <div className="flex flex-wrap items-center gap-2">
-                  {(["TOP10", "ALL"] as const).map((m) => (
-                    <button
-                      key={m}
-                      onClick={() => setViewMode(m)}
+              <div className="salx-card p-3.5 space-y-2.5">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div className="flex flex-wrap items-center gap-2">
+                    {(["TOP10", "ALL"] as const).map((m) => (
+                      <button
+                        key={m}
+                        onClick={() => setViewMode(m)}
+                        style={{
+                          fontFamily: MONO,
+                          fontSize: 10.5,
+                          letterSpacing: ".08em",
+                          textTransform: "uppercase",
+                          padding: "7px 14px",
+                          borderRadius: 6,
+                          border: "1px solid var(--bd)",
+                          cursor: "pointer",
+                          background: viewMode === m ? "var(--g)" : "var(--surf2)",
+                          color: viewMode === m ? "var(--g-contrast)" : "var(--mut)",
+                          fontWeight: 700,
+                        }}
+                      >
+                        {m === "TOP10" ? "TOP 10 NỔI BẬT" : `TOÀN BỘ (${bundle.discovery.length} MÃ)`}
+                      </button>
+                    ))}
+
+                    <select
+                      value={sectorFilter}
+                      onChange={(e) => setSectorFilter(e.target.value)}
                       style={{
                         fontFamily: MONO,
-                        fontSize: 10.5,
-                        letterSpacing: ".08em",
-                        textTransform: "uppercase",
-                        padding: "7px 14px",
-                        borderRadius: 6,
+                        fontSize: 11,
+                        background: "var(--surf2)",
                         border: "1px solid var(--bd)",
-                        cursor: "pointer",
-                        background: viewMode === m ? "var(--g)" : "var(--surf2)",
-                        color: viewMode === m ? "var(--g-contrast)" : "var(--mut)",
-                        fontWeight: 700,
+                        color: "var(--ink)",
+                        borderRadius: 6,
+                        padding: "6px 10px",
                       }}
                     >
-                      {m === "TOP10" ? "TOP 10 TINH HOA" : `TOÀN BỘ (${bundle.discovery.length} MÃ)`}
-                    </button>
-                  ))}
+                      {sectors.map((s) => (
+                        <option key={s} value={s}>
+                          {s === "ALL" ? "TẤT CẢ NHÓM NGÀNH" : vnSectorName(s).toUpperCase()}
+                        </option>
+                      ))}
+                    </select>
 
-                  <select
-                    value={sectorFilter}
-                    onChange={(e) => setSectorFilter(e.target.value)}
-                    style={{
-                      fontFamily: MONO,
-                      fontSize: 11,
-                      background: "var(--surf2)",
-                      border: "1px solid var(--bd)",
-                      color: "var(--ink)",
-                      borderRadius: 6,
-                      padding: "6px 10px",
-                    }}
-                  >
-                    {sectors.map((s) => (
-                      <option key={s} value={s}>
-                        {s === "ALL" ? "TẤT CẢ NHÓM NGÀNH" : vnSectorName(s).toUpperCase()}
-                      </option>
-                    ))}
-                  </select>
-
-                  <input
-                    type="text"
-                    placeholder="TÌM MÃ (VD: FPT, VCB)..."
-                    value={searchQuery}
-                    onChange={(e) => setSearchQuery(e.target.value)}
-                    style={{
-                      fontFamily: MONO,
-                      fontSize: 11,
-                      background: "var(--surf2)",
-                      border: "1px solid var(--bd)",
-                      color: "var(--ink)",
-                      borderRadius: 6,
-                      padding: "6px 10px",
-                      width: 170,
-                    }}
-                  />
-                </div>
-
-                <div className="flex items-center gap-3">
-                  <div style={{ fontFamily: MONO, fontSize: 10.5, color: "var(--mut)" }}>
-                    ALPHA ≥ <strong style={{ color: "var(--g)" }}>{minScore}</strong>
                     <input
-                      type="range"
-                      min={0}
-                      max={85}
-                      step={5}
-                      value={minScore}
-                      onChange={(e) => setMinScore(Number(e.target.value))}
-                      className="ml-2 w-20 align-middle"
+                      type="text"
+                      placeholder="TÌM MÃ (VD: FPT, VCB)..."
+                      value={searchQuery}
+                      onChange={(e) => setSearchQuery(e.target.value)}
+                      style={{
+                        fontFamily: MONO,
+                        fontSize: 11,
+                        background: "var(--surf2)",
+                        border: "1px solid var(--bd)",
+                        color: "var(--ink)",
+                        borderRadius: 6,
+                        padding: "6px 10px",
+                        width: 170,
+                      }}
                     />
                   </div>
-                  <button
-                    onClick={exportDiscoveryCsv}
-                    style={{
-                      display: "inline-flex",
-                      alignItems: "center",
-                      gap: 6,
-                      fontFamily: MONO,
-                      fontSize: 10.5,
-                      fontWeight: 700,
-                      background: "var(--gb)",
-                      border: "1px solid var(--gd)",
-                      color: "var(--g)",
-                      borderRadius: 6,
-                      padding: "6px 12px",
-                      cursor: "pointer",
-                    }}
-                  >
-                    <Download className="h-3.5 w-3.5" />
-                    XUẤT CSV
-                  </button>
+
+                  <div className="flex flex-wrap items-center gap-3">
+                    <div style={{ fontFamily: MONO, fontSize: 10.5, color: "var(--mut)" }}>
+                      ĐIỂM PORI ≥ <strong style={{ color: "var(--g)" }}>{minScore}</strong>
+                      <input
+                        type="range"
+                        min={0}
+                        max={85}
+                        step={5}
+                        value={minScore}
+                        onChange={(e) => setMinScore(Number(e.target.value))}
+                        className="ml-2 w-20 align-middle"
+                      />
+                    </div>
+                    <button
+                      onClick={() => setShowPoriGuide((v) => !v)}
+                      style={{
+                        display: "inline-flex",
+                        alignItems: "center",
+                        gap: 5,
+                        fontFamily: MONO,
+                        fontSize: 10,
+                        fontWeight: 700,
+                        background: showPoriGuide ? "var(--g)" : "var(--surf2)",
+                        border: `1px solid ${showPoriGuide ? "var(--g)" : "var(--bd-mid)"}`,
+                        color: showPoriGuide ? "var(--g-contrast)" : "var(--g)",
+                        borderRadius: 6,
+                        padding: "6px 10px",
+                        cursor: "pointer",
+                      }}
+                    >
+                      <HelpCircle className="h-3.5 w-3.5" />
+                      ĐIỂM PORI LÀ GÌ?
+                    </button>
+                    <button
+                      onClick={exportDiscoveryCsv}
+                      style={{
+                        display: "inline-flex",
+                        alignItems: "center",
+                        gap: 6,
+                        fontFamily: MONO,
+                        fontSize: 10.5,
+                        fontWeight: 700,
+                        background: "var(--gb)",
+                        border: "1px solid var(--gd)",
+                        color: "var(--g)",
+                        borderRadius: 6,
+                        padding: "6px 12px",
+                        cursor: "pointer",
+                      }}
+                    >
+                      <Download className="h-3.5 w-3.5" />
+                      XUẤT CSV
+                    </button>
+                  </div>
+                </div>
+
+                {/* Explanatory Note for Điểm PORI */}
+                <div
+                  className="salx-sub px-3 py-2 text-xs"
+                  style={{
+                    borderColor: showPoriGuide ? "var(--g)" : "var(--bd-soft)",
+                    color: "var(--mut)",
+                    lineHeight: 1.5,
+                  }}
+                >
+                  <strong style={{ color: "var(--g)", fontFamily: MONO }}>GHI CHÚ ĐIỂM PORI (0–100):</strong>{" "}
+                  Thang điểm tổng hợp sức mạnh cổ phiếu theo 4 nhóm yếu tố (<strong>Xu hướng & Động lượng 35%</strong>,{" "}
+                  <strong>Thanh khoản & Sổ lệnh 25%</strong>, <strong>Khối ngoại 15%</strong>,{" "}
+                  <strong>Cơ bản Doanh nghiệp 25%</strong>), chuẩn hóa phân vị trên toàn bộ 55 cổ phiếu dẫn dắt HOSE.
+                  {showPoriGuide && (
+                    <span style={{ display: "block", marginTop: 4, color: "var(--ink)" }}>
+                      • Cách đọc nhanh: <strong>≥ 75 điểm</strong> là cổ phiếu dẫn dắt xu hướng & thanh khoản nổi bật;{" "}
+                      <strong>50–74 điểm</strong> là trung tính/tích lũy; <strong>&lt; 50 điểm</strong> là yếu hơn mặt bằng chung.{" "}
+                      Toàn bộ dữ liệu được cắt nhiễu ngoại lệ (Winsorization 2.5%–97.5%) và không gán 0 điểm nếu thiếu BCTC.
+                    </span>
+                  )}
                 </div>
               </div>
 
@@ -1976,10 +2298,10 @@ export default function HomePage() {
                         <th className="px-3 py-3">Mã CK</th>
                         <th className="px-2 py-3">Ngành</th>
                         <th className="px-2 py-3 text-right">Giá (VNĐ)</th>
-                        <th className="px-2 py-3 text-right">SM Giá 20p</th>
+                        <th className="px-2 py-3 text-right">Biến động 20P</th>
                         <th className="px-2 py-3 text-center">Xu hướng / TK</th>
-                        <th className="px-2 py-3 text-center">Điểm Alpha</th>
-                        <th className="px-2 py-3 text-center">Độ Tương thích</th>
+                        <th className="px-2 py-3 text-center">Điểm PORI</th>
+                        <th className="px-2 py-3 text-center">Phù hợp DM</th>
                         <th className="px-3 py-3 text-right">Mô phỏng</th>
                       </tr>
                     </thead>
@@ -2149,15 +2471,15 @@ export default function HomePage() {
                     </div>
 
                     <div className="flex gap-2">
-                      <div className="salx-sub px-2.5 py-1.5 text-center">
-                        <div style={{ fontFamily: MONO, fontSize: 8.5, color: "var(--mut)" }}>ALPHA</div>
+                      <div className="salx-sub px-2.5 py-1.5 text-center" title="Điểm PORI (0–100): Chấm theo 4 trụ cột Xu hướng, Thanh khoản, Khối ngoại & Cơ bản">
+                        <div style={{ fontFamily: MONO, fontSize: 8.5, color: "var(--mut)" }}>ĐIỂM PORI</div>
                         <div className="font-mono-num" style={{ fontSize: 17, fontWeight: 800, color: "var(--g)" }}>
                           {selectedStock.alpha_score}
                         </div>
                       </div>
                       {selectedFit && (
-                        <div className="salx-sub px-2.5 py-1.5 text-center">
-                          <div style={{ fontFamily: MONO, fontSize: 8.5, color: "var(--mut)" }}>TƯƠNG THÍCH</div>
+                        <div className="salx-sub px-2.5 py-1.5 text-center" title="Độ phù hợp khi thêm vào danh mục hiện tại">
+                          <div style={{ fontFamily: MONO, fontSize: 8.5, color: "var(--mut)" }}>PHÙ HỢP DM</div>
                           <div className="font-mono-num" style={{ fontSize: 17, fontWeight: 800, color: "var(--cyan)" }}>
                             {selectedFit.portfolio_fit_score}
                           </div>
@@ -2180,7 +2502,7 @@ export default function HomePage() {
 
                   <div className="salx-sub space-y-2.5 p-3.5 text-xs">
                     <div className="flex justify-between" style={{ fontFamily: MONO, fontSize: 10 }}>
-                      <span style={{ fontWeight: 700 }}>PHÂN RÃ 4 CẤU PHẦN ĐIỂM ALPHA</span>
+                      <span style={{ fontWeight: 700 }}>CẤU THÀNH 4 TRỤ CỘT ĐIỂM PORI</span>
                       <span style={{ color: "var(--g)" }}>
                         ĐỘ ĐẦY ĐỦ: {Math.round(selectedStock.data_completeness * 100)}%
                       </span>
@@ -2289,7 +2611,7 @@ export default function HomePage() {
                         cursor: "pointer",
                       }}
                     >
-                      SOI SỔ LỆNH 3 BƯỚC ↗
+                      XEM SỔ LỆNH 3 BƯỚC ↗
                     </button>
                   </div>
                 </div>
@@ -2328,7 +2650,7 @@ export default function HomePage() {
                 danger
               />
               <StatCard
-                label="ĐIỂM SỨC KHỎE & BETA DANH MỤC"
+                label="CHỈ SỐ AN TOÀN & BETA DANH MỤC"
                 value={activeHealth.health_score}
                 unit="/ 100"
                 sub={`Beta vs VNINDEX: ${activeHealth.portfolio_beta} • Biến động năm: ${(activeHealth.annualized_vol_pct * 100).toFixed(1)}%`}
@@ -2340,7 +2662,31 @@ export default function HomePage() {
             <div className="salx-card p-5">
               <SectionLabel
                 right={
-                  <div className="flex items-center gap-2">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <button
+                      onClick={() => {
+                        setPositions({});
+                        setPortfolioMsg("Đã xóa các cổ phiếu — Danh mục đang ở chế độ 100% Tiền mặt để bạn tự nhập lại.");
+                        pushSimulationLog("UPDATE_PORTFOLIO", "Đưa danh mục về 100% tiền mặt để thiết lập mới");
+                      }}
+                      style={{
+                        display: "inline-flex",
+                        alignItems: "center",
+                        gap: 5,
+                        fontFamily: MONO,
+                        fontSize: 10,
+                        padding: "5px 10px",
+                        borderRadius: 6,
+                        background: "var(--avax-bg)",
+                        border: "1px solid var(--avax-bd)",
+                        color: "var(--avax)",
+                        cursor: "pointer",
+                        fontWeight: 700,
+                      }}
+                    >
+                      <RotateCcw className="h-3 w-3" />
+                      BẮT ĐẦU TỪ TIỀN MẶT
+                    </button>
                     <button
                       onClick={() => {
                         setPositions(bundle.default_portfolio.positions);
@@ -2382,41 +2728,64 @@ export default function HomePage() {
                   </div>
                 }
               >
-                CƠ CẤU VỊ THẾ HIỆN TẠI & ĐÓNG GÓP RỦI RO BIÊN (MARGINAL RISK CONTRIBUTION)
+                DANH MỤC ĐANG NẮM GIỮ & ĐÓNG GÓP RỦI RO BIÊN (MARGINAL RISK)
               </SectionLabel>
 
-              <div className="flex flex-wrap gap-2">
-                {Object.entries(positions).map(([sym, val]) => {
-                  const weightPct = ((val / activeHealth.total_nav_vnd) * 100).toFixed(1);
-                  const riskContrib = activeHealth.component_risk_pct?.[sym] ?? weightPct;
-                  const dtl = activeHealth.days_to_liquidate[sym] ?? 0.2;
-                  return (
-                    <div
-                      key={sym}
-                      className="salx-sub inline-flex items-center gap-2.5 px-3 py-2 text-xs"
-                    >
-                      <span className="font-mono-num font-extrabold" style={{ color: "var(--g)" }}>
-                        {sym}
-                      </span>
-                      <span className="font-mono-num font-semibold">{fmtVnd(val)}</span>
-                      <span style={{ fontFamily: MONO, fontSize: 10.5, color: "var(--mut)" }}>
-                        Vốn: {weightPct}% • <strong style={{ color: "var(--avax)" }}>Rủi ro biên: {riskContrib}%</strong> • Thanh lý: {dtl}p
-                      </span>
-                      <button
-                        onClick={() => {
-                          const next = { ...positions };
-                          delete next[sym];
-                          if (Object.keys(next).length > 0) setPositions(next);
-                        }}
-                        style={{ color: "var(--mut)", cursor: "pointer" }}
-                        title="Xóa vị thế"
+              {Object.keys(positions).length === 0 ? (
+                <div className="salx-sub p-4 text-xs" style={{ color: "var(--mut)" }}>
+                  Danh mục hiện chưa nắm giữ mã cổ phiếu nào (100% tiền mặt). Bạn có thể thêm mã bên dưới theo{" "}
+                  <strong style={{ color: "var(--ink)" }}>Số lượng CP (lô 100)</strong> hoặc{" "}
+                  <strong style={{ color: "var(--ink)" }}>Số tiền VNĐ</strong>.
+                </div>
+              ) : (
+                <div className="flex flex-wrap gap-2">
+                  {Object.entries(positions).map(([sym, val]) => {
+                    const weightPct =
+                      activeHealth.total_nav_vnd > 0
+                        ? ((val / activeHealth.total_nav_vnd) * 100).toFixed(1)
+                        : "0.0";
+                    const riskContrib = activeHealth.component_risk_pct?.[sym] ?? weightPct;
+                    const dtl = activeHealth.days_to_liquidate[sym] ?? 0.2;
+                    const px = discoveryMap[sym]?.close_price;
+                    const approxShares = px && px > 0 ? Math.round(val / px) : null;
+                    return (
+                      <div
+                        key={sym}
+                        className="salx-sub inline-flex items-center gap-2.5 px-3 py-2 text-xs"
                       >
-                        <Trash2 className="h-3.5 w-3.5" />
-                      </button>
-                    </div>
-                  );
-                })}
-              </div>
+                        <span className="font-mono-num font-extrabold" style={{ color: "var(--g)" }}>
+                          {sym}
+                        </span>
+                        <span className="font-mono-num font-semibold">
+                          {fmtVnd(val)}
+                          {approxShares !== null && (
+                            <span style={{ color: "var(--mut)", fontSize: 10.5, marginLeft: 4 }}>
+                              (~{approxShares.toLocaleString("vi-VN")} CP)
+                            </span>
+                          )}
+                        </span>
+                        <span style={{ fontFamily: MONO, fontSize: 10.5, color: "var(--mut)" }}>
+                          Tỷ trọng: {weightPct}% •{" "}
+                          <strong style={{ color: "var(--avax)" }}>Rủi ro biên: {riskContrib}%</strong> • Thanh khoản: {dtl}p
+                        </span>
+                        <button
+                          onClick={() => {
+                            const next = { ...positions };
+                            delete next[sym];
+                            setPositions(next);
+                            setPortfolioMsg(`Đã xóa ${sym} khỏi danh mục.`);
+                            pushSimulationLog("UPDATE_PORTFOLIO", `Xóa vị thế ${sym} khỏi danh mục`, sym);
+                          }}
+                          style={{ color: "var(--mut)", cursor: "pointer" }}
+                          title="Xóa vị thế"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
 
               <div
                 className="mt-4 flex flex-wrap items-end gap-3 pt-3"
@@ -2441,37 +2810,100 @@ export default function HomePage() {
                   >
                     {bundle.discovery.map((d) => (
                       <option key={d.symbol} value={d.symbol}>
-                        {d.symbol} ({vnSectorName(d.sector)})
+                        {d.symbol} ({vnSectorName(d.sector)} • {d.close_price.toLocaleString("vi-VN")} đ)
                       </option>
                     ))}
                   </select>
                 </div>
+
                 <div>
                   <label style={{ display: "block", fontFamily: MONO, fontSize: 9.5, color: "var(--mut)", marginBottom: 4 }}>
-                    GIÁ TRỊ VỊ THẾ (VNĐ)
+                    CÁCH NHẬP VỊ THẾ
                   </label>
-                  <input
-                    type="number"
-                    step={10_000_000}
-                    value={newPosAmt}
-                    onChange={(e) => setNewPosAmt(Number(e.target.value))}
-                    style={{
-                      fontFamily: MONO,
-                      fontSize: 11,
-                      background: "var(--surf2)",
-                      border: "1px solid var(--bd)",
-                      color: "var(--ink)",
-                      borderRadius: 6,
-                      padding: "6px 10px",
-                      width: 155,
-                    }}
-                  />
+                  <div className="inline-flex rounded-md overflow-hidden" style={{ border: "1px solid var(--bd)" }}>
+                    {[
+                      { id: "SHARES", label: "SỐ CP (LÔ 100)" },
+                      { id: "VND", label: "SỐ TIỀN (VNĐ)" },
+                    ].map((m) => (
+                      <button
+                        key={m.id}
+                        type="button"
+                        onClick={() => setPosInputMode(m.id as "SHARES" | "VND")}
+                        style={{
+                          fontFamily: MONO,
+                          fontSize: 10,
+                          fontWeight: 700,
+                          padding: "6px 10px",
+                          border: "none",
+                          cursor: "pointer",
+                          background: posInputMode === m.id ? "var(--g)" : "var(--surf2)",
+                          color: posInputMode === m.id ? "var(--g-contrast)" : "var(--mut)",
+                        }}
+                      >
+                        {m.label}
+                      </button>
+                    ))}
+                  </div>
                 </div>
+
+                {posInputMode === "SHARES" ? (
+                  <div>
+                    <label style={{ display: "block", fontFamily: MONO, fontSize: 9.5, color: "var(--mut)", marginBottom: 4 }}>
+                      SỐ LƯỢNG CỔ PHIẾU (≈{" "}
+                      {fmtVnd((newPosShares || 0) * (discoveryMap[newPosSym]?.close_price || 30000))})
+                    </label>
+                    <input
+                      type="number"
+                      step={100}
+                      min={100}
+                      value={newPosShares}
+                      onChange={(e) => setNewPosShares(Math.max(100, Number(e.target.value)))}
+                      style={{
+                        fontFamily: MONO,
+                        fontSize: 11,
+                        background: "var(--surf2)",
+                        border: "1px solid var(--bd)",
+                        color: "var(--ink)",
+                        borderRadius: 6,
+                        padding: "6px 10px",
+                        width: 175,
+                      }}
+                    />
+                  </div>
+                ) : (
+                  <div>
+                    <label style={{ display: "block", fontFamily: MONO, fontSize: 9.5, color: "var(--mut)", marginBottom: 4 }}>
+                      GIÁ TRỊ VỊ THẾ (VNĐ)
+                    </label>
+                    <input
+                      type="number"
+                      step={10_000_000}
+                      value={newPosAmt}
+                      onChange={(e) => setNewPosAmt(Number(e.target.value))}
+                      style={{
+                        fontFamily: MONO,
+                        fontSize: 11,
+                        background: "var(--surf2)",
+                        border: "1px solid var(--bd)",
+                        color: "var(--ink)",
+                        borderRadius: 6,
+                        padding: "6px 10px",
+                        width: 155,
+                      }}
+                    />
+                  </div>
+                )}
+
                 <button
                   onClick={() => {
-                    if (newPosSym && newPosAmt > 0) {
-                      setPositions({ ...positions, [newPosSym]: newPosAmt });
-                      setPortfolioMsg(`Đã cập nhật ${newPosSym} (${fmtVnd(newPosAmt)}) và tính lại VaR/HHI!`);
+                    const price = discoveryMap[newPosSym]?.close_price || 30000;
+                    const finalAmt =
+                      posInputMode === "SHARES" ? Math.round(newPosShares * price) : Math.round(newPosAmt);
+                    if (newPosSym && finalAmt > 0) {
+                      setPositions({ ...positions, [newPosSym]: finalAmt });
+                      const msg = `Đã cập nhật ${newPosSym} (${fmtVnd(finalAmt)}) và tính lại VaR/HHI tức thời!`;
+                      setPortfolioMsg(msg);
+                      pushSimulationLog("UPDATE_PORTFOLIO", msg, newPosSym, finalAmt);
                     }
                   }}
                   style={{
@@ -2522,6 +2954,225 @@ export default function HomePage() {
               )}
             </div>
 
+            {/* CAPITAL-AWARE DIVERSIFICATION & SIZING ADVISOR */}
+            {capitalAdvice && (
+              <div className="salx-card p-5" style={{ borderColor: "var(--indigo-bd)" }}>
+                <div className="flex flex-wrap items-start justify-between gap-4">
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <Scale className="h-4 w-4" style={{ color: "var(--cyan)" }} />
+                      <span
+                        style={{
+                          fontFamily: MONO,
+                          fontSize: 9.5,
+                          fontWeight: 800,
+                          color: "var(--cyan)",
+                          letterSpacing: ".1em",
+                        }}
+                      >
+                        CỐ VẤN CẤU TRÚC VỐN & NGƯỠNG ĐA DẠNG HÓA TỐI ƯU (HOSE LÔ 100 CP)
+                      </span>
+                    </div>
+                    <h3 style={{ fontFamily: DISPLAY, fontSize: 20, fontWeight: 800, margin: "4px 0 0" }}>
+                      {capitalAdvice.tierTitle}
+                    </h3>
+                  </div>
+
+                  {/* User chooses own capital */}
+                  <div className="flex flex-wrap items-end gap-2">
+                    <div>
+                      <label style={{ display: "block", fontFamily: MONO, fontSize: 9.5, color: "var(--mut)", marginBottom: 4 }}>
+                        NHẬP TỔNG VỐN BẢN THÂN CÓ (VNĐ)
+                      </label>
+                      <input
+                        type="number"
+                        step={10_000_000}
+                        min={5_000_000}
+                        value={targetCapitalVnd}
+                        onChange={(e) => setTargetCapitalVnd(Math.max(5_000_000, Number(e.target.value)))}
+                        style={{
+                          fontFamily: MONO,
+                          fontSize: 12,
+                          fontWeight: 800,
+                          background: "var(--surf2)",
+                          border: "1px solid var(--gd)",
+                          color: "var(--ink)",
+                          borderRadius: 6,
+                          padding: "6px 10px",
+                          width: 170,
+                        }}
+                      />
+                    </div>
+                    <div className="flex flex-wrap gap-1">
+                      {[20_000_000, 40_000_000, 100_000_000, 250_000_000, 500_000_000, 1_000_000_000].map((cap) => (
+                        <button
+                          key={cap}
+                          onClick={() => setTargetCapitalVnd(cap)}
+                          style={{
+                            fontFamily: MONO,
+                            fontSize: 10,
+                            fontWeight: 700,
+                            padding: "6px 9px",
+                            borderRadius: 6,
+                            border: "1px solid var(--bd)",
+                            background: targetCapitalVnd === cap ? "var(--g)" : "var(--surf2)",
+                            color: targetCapitalVnd === cap ? "var(--g-contrast)" : "var(--mut)",
+                            cursor: "pointer",
+                          }}
+                        >
+                          {cap >= 1e9 ? `${cap / 1e9} TỶ` : `${cap / 1e6} TR`}
+                        </button>
+                      ))}
+                      <button
+                        onClick={() => setTargetCapitalVnd(Math.max(10_000_000, activeHealth.total_nav_vnd))}
+                        style={{
+                          fontFamily: MONO,
+                          fontSize: 10,
+                          fontWeight: 700,
+                          padding: "6px 9px",
+                          borderRadius: 6,
+                          border: "1px solid var(--gd)",
+                          background: "var(--gb)",
+                          color: "var(--g)",
+                          cursor: "pointer",
+                        }}
+                        title="Đồng bộ theo Tổng NAV danh mục phía trên"
+                      >
+                        THEO NAV HIỆN TẠI
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="mt-4 grid gap-4 lg:grid-cols-12">
+                  <div className="lg:col-span-7 space-y-3">
+                    <div
+                      className="salx-sub p-3.5"
+                      style={{
+                        borderColor: capitalAdvice.shouldDiversifyMore ? "var(--gd)" : "var(--org)",
+                        background: "var(--surf2)",
+                      }}
+                    >
+                      <div className="flex flex-wrap items-center justify-between gap-2 mb-1.5">
+                        <span
+                          style={{
+                            fontFamily: MONO,
+                            fontSize: 10,
+                            fontWeight: 800,
+                            padding: "3px 9px",
+                            borderRadius: 99,
+                            background: capitalAdvice.shouldDiversifyMore ? "var(--gb)" : "rgba(245,158,11,0.16)",
+                            color: capitalAdvice.shouldDiversifyMore ? "var(--g)" : "var(--org)",
+                            border: `1px solid ${capitalAdvice.shouldDiversifyMore ? "var(--gd)" : "rgba(245,158,11,0.4)"}`,
+                          }}
+                        >
+                          {capitalAdvice.verdictBadge}
+                        </span>
+                        <span style={{ fontFamily: MONO, fontSize: 10, color: "var(--mut)" }}>
+                          Đang giữ: <strong style={{ color: "var(--ink)" }}>{capitalAdvice.currentCount} mã</strong> • Đề xuất:{" "}
+                          <strong style={{ color: "var(--g)" }}>{capitalAdvice.recommendedCountLabel}</strong>
+                        </span>
+                      </div>
+
+                      <div style={{ fontSize: 14, fontWeight: 700, color: "var(--ink)", marginTop: 6 }}>
+                        {capitalAdvice.headline}
+                      </div>
+                      <p style={{ fontSize: 12.5, color: "var(--mut)", marginTop: 6, marginBottom: 0, lineHeight: 1.55 }}>
+                        {capitalAdvice.rationale}
+                      </p>
+                    </div>
+
+                    <div className="grid grid-cols-3 gap-2.5 text-center">
+                      <div className="salx-sub p-2.5">
+                        <div style={{ fontFamily: MONO, fontSize: 9, color: "var(--mut)" }}>SỐ MÃ KHUYẾN NGHỊ</div>
+                        <div className="font-mono-num mt-1 text-xs font-extrabold" style={{ color: "var(--g)" }}>
+                          {capitalAdvice.tier === "SMALL"
+                            ? "1 – 2 MÃ"
+                            : capitalAdvice.tier === "MEDIUM"
+                            ? "2 – 4 MÃ"
+                            : "4 – 7 MÃ"}
+                        </div>
+                      </div>
+                      <div className="salx-sub p-2.5">
+                        <div style={{ fontFamily: MONO, fontSize: 9, color: "var(--mut)" }}>TỐI THIỂU / VỊ THẾ</div>
+                        <div className="font-mono-num mt-1 text-xs font-extrabold" style={{ color: "var(--ink)" }}>
+                          ~{(capitalAdvice.minPosSizeVnd / 1e6).toFixed(0)} TRIỆU
+                        </div>
+                      </div>
+                      <div className="salx-sub p-2.5">
+                        <div style={{ fontFamily: MONO, fontSize: 9, color: "var(--mut)" }}>ĐỆM TIỀN MẶT ĐỀ XUẤT</div>
+                        <div className="font-mono-num mt-1 text-xs font-extrabold" style={{ color: "var(--cyan)" }}>
+                          {capitalAdvice.recommendedCashPct}% VỐN
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="space-y-1.5 text-xs">
+                      {capitalAdvice.actionChecklist.map((act, i) => (
+                        <div key={i} className="flex items-start gap-2">
+                          <CheckCircle2 className="mt-0.5 h-3.5 w-3.5 shrink-0" style={{ color: "var(--g)" }} />
+                          <span style={{ color: "var(--ink)" }}>{act}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="lg:col-span-5 space-y-2.5">
+                    <div style={{ fontFamily: MONO, fontSize: 10, fontWeight: 700, color: "var(--mut)" }}>
+                      GỢI Ý PHÂN BỔ PHÙ HỢP VỚI QUY MÔ VỐN ({fmtVnd(capitalAdvice.capitalVnd)})
+                    </div>
+                    {capitalAdvice.suggestedCandidates.map((cand) => (
+                      <div key={cand.symbol} className="salx-sub p-3 space-y-1.5">
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-2">
+                            <span className="font-mono-num text-sm font-extrabold" style={{ color: "var(--g)" }}>
+                              {cand.symbol}
+                            </span>
+                            <span style={{ fontSize: 11, color: "var(--mut)" }}>{cand.sector}</span>
+                          </div>
+                          <div style={{ fontFamily: MONO, fontSize: 10.5 }}>
+                            PORI: <strong style={{ color: "var(--g)" }}>{cand.poriScore}</strong> • Phù hợp:{" "}
+                            <strong style={{ color: "var(--cyan)" }}>{cand.fitScore}</strong>
+                          </div>
+                        </div>
+                        <p style={{ margin: 0, fontSize: 11.5, color: "var(--mut)" }}>{cand.reason}</p>
+                        <div className="flex items-center justify-between pt-1">
+                          <span style={{ fontFamily: MONO, fontSize: 10.5, color: "var(--ink)" }}>
+                            Gợi ý giải ngân: <strong>{fmtVnd(cand.suggestedAmountVnd)}</strong>
+                          </span>
+                          <button
+                            onClick={() => {
+                              setWhatIfSymbol(cand.symbol);
+                              setWhatIfAmount(cand.suggestedAmountVnd);
+                              pushSimulationLog(
+                                "CAPITAL_PLAN",
+                                `Áp dụng gợi ý vốn ${(capitalAdvice.capitalVnd / 1e6).toFixed(0)}tr: thử ${cand.symbol} (${fmtVnd(cand.suggestedAmountVnd)})`,
+                                cand.symbol,
+                                cand.suggestedAmountVnd
+                              );
+                            }}
+                            style={{
+                              fontFamily: MONO,
+                              fontSize: 9.5,
+                              fontWeight: 700,
+                              padding: "4px 9px",
+                              borderRadius: 5,
+                              border: "1px solid var(--gd)",
+                              background: "var(--gb)",
+                              color: "var(--g)",
+                              cursor: "pointer",
+                            }}
+                          >
+                            MÔ PHỎNG MÃ NÀY ↓
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            )}
+
             {/* 5-DIMENSION BEFORE vs AFTER WHAT-IF SIMULATOR */}
             <div className="salx-card p-5" style={{ borderColor: "var(--gd)" }}>
               <div className="flex flex-wrap items-center justify-between gap-3">
@@ -2555,7 +3206,7 @@ export default function HomePage() {
                     >
                       {bundle.discovery.map((d) => (
                         <option key={d.symbol} value={d.symbol}>
-                          {d.symbol} — {vnSectorName(d.sector)} (Alpha: {d.alpha_score})
+                          {d.symbol} — {vnSectorName(d.sector)} (PORI: {d.alpha_score})
                         </option>
                       ))}
                     </select>
@@ -2583,7 +3234,7 @@ export default function HomePage() {
                     />
                   </div>
                   <div className="flex gap-1">
-                    {[30_000_000, 50_000_000, 100_000_000, 200_000_000].map((amt) => (
+                    {[20_000_000, 50_000_000, 100_000_000, 200_000_000].map((amt) => (
                       <button
                         key={amt}
                         onClick={() => setWhatIfAmount(amt)}
@@ -2655,7 +3306,7 @@ export default function HomePage() {
 
                     <div className="salx-sub p-3">
                       <div style={{ fontFamily: MONO, fontSize: 9.5, color: "var(--mut)" }}>
-                        4. TƯƠNG QUAN VỊ THẾ HIỆN HỮU
+                        4. TƯƠNG QUAN DANH MỤC
                       </div>
                       <div className="font-mono-num mt-1 text-lg font-extrabold">
                         ρ_TB = {activeWhatIf.avg_corr_with_portfolio}
@@ -2671,13 +3322,13 @@ export default function HomePage() {
 
                     <div className="salx-sub p-3">
                       <div style={{ fontFamily: MONO, fontSize: 9.5, color: "var(--mut)" }}>
-                        5. THANH KHOẢN & ĐIỂM TƯƠNG THÍCH
+                        5. THANH KHOẢN & ĐỘ PHÙ HỢP
                       </div>
                       <div className="font-mono-num mt-1 text-lg font-extrabold" style={{ color: "var(--g)" }}>
                         {activeWhatIf.portfolio_fit_score} / 100
                       </div>
                       <div style={{ fontFamily: MONO, fontSize: 10, color: "var(--mut)", marginTop: 4 }}>
-                        Thoát hàng: <strong>{activeWhatIf.candidate_dtl_days ?? 0.2} phiên</strong>
+                        Thời gian thanh khoản: <strong>{activeWhatIf.candidate_dtl_days ?? 0.2} phiên</strong>
                       </div>
                     </div>
                   </div>
@@ -2686,36 +3337,130 @@ export default function HomePage() {
                     className="salx-sub flex flex-wrap items-center justify-between gap-3 p-3.5 text-xs"
                     style={{ borderColor: "var(--gd)" }}
                   >
-                    <div>
+                    <div style={{ flex: "1 1 360px" }}>
                       <strong style={{ color: "var(--g)", fontFamily: MONO }}>LUẬN GIẢI TÁC ĐỘNG:</strong>{" "}
                       {activeWhatIf.explanation}
                     </div>
-                    <button
-                      onClick={() => {
-                        setPositions({
-                          ...positions,
-                          [activeWhatIf.candidate_symbol]:
-                            (positions[activeWhatIf.candidate_symbol] || 0) + activeWhatIf.add_amount_vnd,
-                        });
-                        setPortfolioMsg(
-                          `Đã bổ sung ${fmtVnd(activeWhatIf.add_amount_vnd)} vào ${activeWhatIf.candidate_symbol}!`
-                        );
-                      }}
-                      style={{
-                        fontFamily: MONO,
-                        fontSize: 10,
-                        fontWeight: 700,
-                        background: "var(--g)",
-                        color: "var(--g-contrast)",
-                        border: "none",
-                        borderRadius: 6,
-                        padding: "7px 12px",
-                        cursor: "pointer",
-                      }}
-                    >
-                      ÁP DỤNG VÀO DANH MỤC ↗
-                    </button>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <button
+                        onClick={() => {
+                          const msg = `Kịch bản thử: +${fmtVnd(activeWhatIf.add_amount_vnd)} ${activeWhatIf.candidate_symbol} • Phù hợp ${activeWhatIf.portfolio_fit_score}/100 • ΔVaR ${activeWhatIf.delta_var_vnd >= 0 ? "+" : ""}${fmtVnd(activeWhatIf.delta_var_vnd)}`;
+                          pushSimulationLog("WHAT_IF_SIM", msg, activeWhatIf.candidate_symbol, activeWhatIf.add_amount_vnd);
+                          setPortfolioMsg(
+                            authUser
+                              ? `Đã lưu kịch bản ${activeWhatIf.candidate_symbol} vào nhật ký tài khoản ${authUser.email}!`
+                              : "Đã ghi nhận kịch bản vào nhật ký tạm trên máy (Đăng nhập Email để lưu đồng bộ đa thiết bị)."
+                          );
+                        }}
+                        style={{
+                          display: "inline-flex",
+                          alignItems: "center",
+                          gap: 5,
+                          fontFamily: MONO,
+                          fontSize: 10,
+                          fontWeight: 700,
+                          background: "var(--surf)",
+                          color: "var(--g)",
+                          border: "1px solid var(--gd)",
+                          borderRadius: 6,
+                          padding: "7px 11px",
+                          cursor: "pointer",
+                        }}
+                      >
+                        <Save className="h-3.5 w-3.5" />
+                        LƯU KỊCH BẢN NÀY
+                      </button>
+                      <button
+                        onClick={() => {
+                          setPositions({
+                            ...positions,
+                            [activeWhatIf.candidate_symbol]:
+                              (positions[activeWhatIf.candidate_symbol] || 0) + activeWhatIf.add_amount_vnd,
+                          });
+                          const msg = `Áp dụng mua thêm ${fmtVnd(activeWhatIf.add_amount_vnd)} vào ${activeWhatIf.candidate_symbol}`;
+                          setPortfolioMsg(msg);
+                          pushSimulationLog("APPLY_POSITION", msg, activeWhatIf.candidate_symbol, activeWhatIf.add_amount_vnd);
+                        }}
+                        style={{
+                          fontFamily: MONO,
+                          fontSize: 10,
+                          fontWeight: 700,
+                          background: "var(--g)",
+                          color: "var(--g-contrast)",
+                          border: "none",
+                          borderRadius: 6,
+                          padding: "7px 12px",
+                          cursor: "pointer",
+                        }}
+                      >
+                        ÁP DỤNG VÀO DANH MỤC ↗
+                      </button>
+                    </div>
                   </div>
+                </div>
+              )}
+            </div>
+
+            {/* SIMULATION & TASK HISTORY LOG (SYNCED TO EMAIL ACCOUNT WHEN LOGGED IN) */}
+            <div className="salx-card p-5">
+              <SectionLabel
+                right={
+                  <div className="flex items-center gap-2">
+                    <span style={{ fontFamily: MONO, fontSize: 10, color: authUser ? "var(--g)" : "var(--mut)" }}>
+                      {authUser
+                        ? `ĐỒNG BỘ ĐÁM MÂY: ${authUser.email}`
+                        : "ĐANG LƯU TẠM TRÊN TRÌNH DUYỆT"}
+                    </span>
+                    {!authUser && (
+                      <button
+                        onClick={() => setAuthModalOpen(true)}
+                        style={{
+                          fontFamily: MONO,
+                          fontSize: 9.5,
+                          fontWeight: 700,
+                          padding: "3px 9px",
+                          borderRadius: 5,
+                          border: "1px solid var(--gd)",
+                          background: "var(--gb)",
+                          color: "var(--g)",
+                          cursor: "pointer",
+                        }}
+                      >
+                        ĐĂNG NHẬP EMAIL ĐỂ LƯU VĨNH VIỄN ↗
+                      </button>
+                    )}
+                  </div>
+                }
+              >
+                <span className="inline-flex items-center gap-1.5">
+                  <History className="h-3.5 w-3.5" style={{ color: "var(--g)" }} />
+                  NHẬT KÝ TÁC VỤ & LỊCH SỬ MÔ PHỎNG ĐÃ LƯU ({simulations.length})
+                </span>
+              </SectionLabel>
+
+              {simulations.length === 0 ? (
+                <p style={{ margin: 0, fontSize: 12, color: "var(--mut)" }}>
+                  Chưa có kịch bản nào được ghi lại. Hãy bấm <strong>“Lưu kịch bản này”</strong> hoặc cập nhật danh mục để lưu lại các phương án bạn đã thử.
+                </p>
+              ) : (
+                <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                  {simulations.slice(0, 9).map((s) => (
+                    <div key={s.id} className="salx-sub p-2.5 text-xs flex items-start justify-between gap-2">
+                      <div>
+                        <div style={{ fontFamily: MONO, fontSize: 9.5, color: "var(--g)", fontWeight: 700 }}>
+                          [{s.createdAt}] •{" "}
+                          {s.actionType === "WHAT_IF_SIM"
+                            ? "KỊCH BẢN THỬ"
+                            : s.actionType === "APPLY_POSITION"
+                            ? "ÁP DỤNG MUA"
+                            : s.actionType === "CAPITAL_PLAN"
+                            ? "CỐ VẤN VỐN"
+                            : "SỬA DANH MỤC"}
+                        </div>
+                        <div style={{ marginTop: 3, color: "var(--ink)", fontSize: 11.5 }}>{s.summary}</div>
+                      </div>
+                    </div>
+                  ))}
                 </div>
               )}
             </div>
@@ -3104,7 +3849,7 @@ export default function HomePage() {
               <div className="salx-card p-5">
                 <SectionLabel>01 / KIỂM ĐỊNH HIỆU SUẤT TÍN HIỆU SÀNG LỌC (SIGNAL VALIDATION)</SectionLabel>
                 <p style={{ fontSize: 12, color: "var(--mut)", marginBottom: 14 }}>
-                  Đo lợi suất vượt trội sau thời điểm phát sinh tín hiệu so với VNINDEX (vào lệnh tại T+1 để chống nhìn trước tương lai, đã trừ 0.30% phí/thuế).
+                  Đo lợi suất vượt trội sau thời điểm phát sinh tín hiệu so với VNINDEX (giả định khớp lệnh tại T+1 để tránh sai lệch dữ liệu tương lai, đã trừ 0.30% phí/thuế).
                 </p>
 
                 <table className="w-full border-collapse text-left text-xs">
@@ -3114,14 +3859,14 @@ export default function HomePage() {
                       <th className="p-2.5 text-right">Số mẫu</th>
                       <th className="p-2.5 text-right">Lợi suất vượt trội TB</th>
                       <th className="p-2.5 text-right">Trung vị vượt trội</th>
-                      <th className="p-2.5 text-right">Tỷ lệ Thắng</th>
+                      <th className="p-2.5 text-right">Xác suất sinh lời</th>
                     </tr>
                   </thead>
                   <tbody>
                     {bundle.validation.signal_validation.map((row) => (
                       <tr key={row.horizon_days} style={{ borderBottom: "1px solid var(--bd-soft)" }}>
                         <td className="p-2.5 font-mono-num font-bold">
-                          Top Alpha Tổng hợp (T+{row.horizon_days})
+                          Top Điểm PORI (T+{row.horizon_days})
                         </td>
                         <td className="p-2.5 text-right font-mono-num">{row.sample_count} mẫu</td>
                         <td
@@ -3270,11 +4015,188 @@ export default function HomePage() {
               <strong style={{ color: "var(--ink)", fontFamily: MONO }}>
                 PHƯƠNG PHÁP ĐỊNH LƯỢNG, GIỚI HẠN & TUYÊN BỐ MIỄN TRỪ:
               </strong>{" "}
-              {bundle.disclaimer} Chuỗi dữ liệu lịch sử 257 phiên từ SSI FastConnect API v3 & cấu trúc sổ lệnh/thị trường từ VPBankS NEO API. Điểm Alpha sử dụng Winsorization [2.5%, 97.5%] và Xếp hạng phân vị; mã thiếu dữ liệu BCTC được chuẩn hóa lại trọng số trên các trụ cột khả dụng (không gán 0 điểm).
+              {bundle.disclaimer} Chuỗi dữ liệu lịch sử 257 phiên từ SSI FastConnect API v3 & cấu trúc sổ lệnh/thị trường từ VPBankS NEO API. Điểm PORI sử dụng Winsorization [2.5%, 97.5%] và Xếp hạng phân vị; mã thiếu dữ liệu BCTC được chuẩn hóa lại trọng số trên các trụ cột khả dụng (không gán 0 điểm).
             </div>
           </div>
         </footer>
       </main>
+
+      {/* ── OPTIONAL EMAIL + PASSWORD AUTH MODAL (GUEST-FIRST ARCHITECTURE) ── */}
+      {authModalOpen && (
+        <div
+          style={{
+            position: "fixed",
+            inset: 0,
+            zIndex: 80,
+            background: "rgba(3, 7, 18, 0.72)",
+            backdropFilter: "blur(6px)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            padding: 16,
+          }}
+          onClick={() => setAuthModalOpen(false)}
+        >
+          <div
+            className="salx-card w-full max-w-md p-6 space-y-4 salx-fade-up"
+            style={{ borderColor: "var(--gd)", boxShadow: "0 24px 64px rgba(0, 0, 0, 0.45)" }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <div style={{ fontFamily: MONO, fontSize: 10, fontWeight: 800, color: "var(--g)" }}>
+                  ĐỒNG BỘ DANH MỤC & LỊCH SỬ MÔ PHỎNG
+                </div>
+                <h3 style={{ fontFamily: DISPLAY, fontSize: 21, fontWeight: 800, margin: "4px 0 0" }}>
+                  {authTab === "login" ? "Đăng Nhập Bằng Email" : "Tạo Tài Khoản Lưu Trữ"}
+                </h3>
+              </div>
+              <button
+                onClick={() => setAuthModalOpen(false)}
+                style={{ background: "none", border: "none", color: "var(--mut)", cursor: "pointer" }}
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            <div
+              className="salx-sub p-3 text-xs"
+              style={{ color: "var(--mut)", lineHeight: 1.5, borderColor: "var(--bd-mid)" }}
+            >
+              💡 <strong style={{ color: "var(--ink)" }}>Không bắt buộc đăng nhập:</strong> Bạn (hoặc giảng viên chấm bài)
+              vẫn dùng thử được 100% tính năng ngay lập tức. Đăng nhập Email chỉ để lưu danh mục & các kịch bản mô phỏng
+              lên đám mây để xem lại trên mọi thiết bị.
+            </div>
+
+            <div className="grid grid-cols-2 gap-2">
+              {[
+                { id: "login", label: "ĐĂNG NHẬP" },
+                { id: "signup", label: "ĐĂNG KÝ MỚI" },
+              ].map((t) => (
+                <button
+                  key={t.id}
+                  type="button"
+                  onClick={() => {
+                    setAuthTab(t.id as "login" | "signup");
+                    setAuthError(null);
+                    setAuthSuccess(null);
+                  }}
+                  style={{
+                    fontFamily: MONO,
+                    fontSize: 10.5,
+                    fontWeight: 700,
+                    padding: "8px 12px",
+                    borderRadius: 8,
+                    border: "1px solid var(--bd-mid)",
+                    background: authTab === t.id ? "var(--g)" : "var(--surf2)",
+                    color: authTab === t.id ? "var(--g-contrast)" : "var(--mut)",
+                    cursor: "pointer",
+                  }}
+                >
+                  {t.label}
+                </button>
+              ))}
+            </div>
+
+            {!isSupabaseConfigured && (
+              <div
+                className="salx-sub p-3 text-xs"
+                style={{ borderColor: "var(--org)", color: "var(--org)", lineHeight: 1.5 }}
+              >
+                <strong>Chưa gắn khóa Supabase trên Vercel:</strong> Hiện trình duyệt vẫn tự động lưu tạm danh mục cho
+                máy này (`localStorage`). Để bật lưu đám mây đa thiết bị, cần thêm{" "}
+                <code>NEXT_PUBLIC_SUPABASE_URL</code> và <code>NEXT_PUBLIC_SUPABASE_ANON_KEY</code> trong Vercel
+                Environment Variables.
+              </div>
+            )}
+
+            <form onSubmit={handleAuthSubmit} className="space-y-3">
+              <div>
+                <label style={{ display: "block", fontFamily: MONO, fontSize: 10, color: "var(--mut)", marginBottom: 4 }}>
+                  ĐỊA CHỈ EMAIL
+                </label>
+                <input
+                  type="email"
+                  required
+                  placeholder="tenban@gmail.com"
+                  value={authEmail}
+                  onChange={(e) => setAuthEmail(e.target.value)}
+                  style={{
+                    width: "100%",
+                    fontFamily: MONO,
+                    fontSize: 12,
+                    background: "var(--surf2)",
+                    border: "1px solid var(--bd-mid)",
+                    color: "var(--ink)",
+                    borderRadius: 8,
+                    padding: "9px 12px",
+                  }}
+                />
+              </div>
+
+              <div>
+                <label style={{ display: "block", fontFamily: MONO, fontSize: 10, color: "var(--mut)", marginBottom: 4 }}>
+                  MẬT KHẨU (TỐI THIỂU 6 KÝ TỰ)
+                </label>
+                <input
+                  type="password"
+                  required
+                  minLength={6}
+                  placeholder="••••••••"
+                  value={authPassword}
+                  onChange={(e) => setAuthPassword(e.target.value)}
+                  style={{
+                    width: "100%",
+                    fontFamily: MONO,
+                    fontSize: 12,
+                    background: "var(--surf2)",
+                    border: "1px solid var(--bd-mid)",
+                    color: "var(--ink)",
+                    borderRadius: 8,
+                    padding: "9px 12px",
+                  }}
+                />
+              </div>
+
+              {authError && (
+                <div className="salx-sub p-2.5 text-xs" style={{ borderColor: "var(--avax-bd)", color: "var(--avax)" }}>
+                  {authError}
+                </div>
+              )}
+
+              {authSuccess && (
+                <div className="salx-sub p-2.5 text-xs" style={{ borderColor: "var(--gd)", color: "var(--g)" }}>
+                  {authSuccess}
+                </div>
+              )}
+
+              <button
+                type="submit"
+                disabled={authBusy}
+                style={{
+                  width: "100%",
+                  fontFamily: MONO,
+                  fontSize: 11,
+                  fontWeight: 800,
+                  padding: "10px 14px",
+                  borderRadius: 8,
+                  border: "none",
+                  background: "var(--g)",
+                  color: "var(--g-contrast)",
+                  cursor: authBusy ? "wait" : "pointer",
+                  opacity: authBusy ? 0.7 : 1,
+                }}
+              >
+                {authBusy
+                  ? "ĐANG XỬ LÝ..."
+                  : authTab === "login"
+                  ? "ĐĂNG NHẬP & ĐỒNG BỘ DANH MỤC"
+                  : "TẠO TÀI KHOẢN & LƯU DANH MỤC"}
+              </button>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

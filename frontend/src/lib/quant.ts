@@ -66,7 +66,67 @@ export function computeClientPortfolioHealth(
     .map((s) => s.toUpperCase())
     .filter((s) => positions[s] > 0 && returnsMap[s] && returnsMap[s].length > 20);
 
-  if (syms.length === 0) return null;
+  if (syms.length === 0) {
+    const cleanCash = Math.max(0, cashVnd);
+    if (cleanCash <= 0) {
+      return {
+        total_nav_vnd: 0,
+        equity_value_vnd: 0,
+        cash_vnd: 0,
+        cash_weight: 1,
+        hhi_stock: 0,
+        n_effective_stock: 0,
+        hhi_sector: 0,
+        portfolio_beta: 0,
+        hist_var_95_pct: 0,
+        hist_var_95_vnd: 0,
+        hist_es_95_pct: 0,
+        hist_es_95_vnd: 0,
+        param_var_95_pct: 0,
+        annualized_vol_pct: 0,
+        health_score: 50,
+        sector_weights: {},
+        correlation_matrix: {},
+        days_to_liquidate: {},
+        stress_tests: {
+          "VNINDEX -3% (Theo Beta)": 0,
+          "VNINDEX -5% (Theo Beta)": 0,
+          "VNINDEX -7% (Bán tháo)": 0,
+        },
+        warnings: ["Chưa có cổ phiếu nào trong danh mục. Hãy nhập vốn hoặc thêm mã để mô phỏng."],
+        daily_returns_series: [],
+        component_risk_pct: {},
+      };
+    }
+    return {
+      total_nav_vnd: Math.round(cleanCash),
+      equity_value_vnd: 0,
+      cash_vnd: Math.round(cleanCash),
+      cash_weight: 1,
+      hhi_stock: 0,
+      n_effective_stock: 0,
+      hhi_sector: 0,
+      portfolio_beta: 0,
+      hist_var_95_pct: 0,
+      hist_var_95_vnd: 0,
+      hist_es_95_pct: 0,
+      hist_es_95_vnd: 0,
+      param_var_95_pct: 0,
+      annualized_vol_pct: 0,
+      health_score: 72,
+      sector_weights: {},
+      correlation_matrix: {},
+      days_to_liquidate: {},
+      stress_tests: {
+        "VNINDEX -3% (Theo Beta)": 0,
+        "VNINDEX -5% (Theo Beta)": 0,
+        "VNINDEX -7% (Bán tháo)": 0,
+      },
+      warnings: ["Đang giữ 100% tiền mặt — Chưa phát sinh rủi ro biến động giá cổ phiếu."],
+      daily_returns_series: [],
+      component_risk_pct: {},
+    };
+  }
 
   const equityVal = syms.reduce((acc, s) => acc + positions[s], 0);
   const cleanCash = Math.max(0, cashVnd);
@@ -267,7 +327,7 @@ export function computeClientWhatIf(
     .filter((s) => positions[s] > 0 && returnsMap[s] && s !== sym);
 
   const pairwiseCorr: Record<string, number> = {};
-  let avgCorr = 1.0;
+  let avgCorr = (positions[sym] || 0) > 0 ? 1.0 : 0.0;
   if (existingSyms.length > 0) {
     const corrs = existingSyms.map((s) => {
       const c = pearsonCorr(returnsMap[s], returnsMap[sym]);
@@ -438,5 +498,229 @@ export function evaluateClientOrderBook(
     sufficient_depth: sufficient,
     level_fills: levelFills,
     note,
+  };
+}
+
+export interface CapitalAllocationAdvice {
+  capitalVnd: number;
+  tier: "SMALL" | "MEDIUM" | "LARGE";
+  tierTitle: string;
+  recommendedCountLabel: string;
+  minPosSizeVnd: number;
+  currentCount: number;
+  recommendedCashPct: number;
+  verdictBadge: string;
+  shouldDiversifyMore: boolean;
+  headline: string;
+  rationale: string;
+  suggestedCandidates: Array<{
+    symbol: string;
+    sector: string;
+    poriScore: number;
+    fitScore: number;
+    avgCorr: number;
+    suggestedAmountVnd: number;
+    reason: string;
+  }>;
+  actionChecklist: string[];
+}
+
+export function computeCapitalAllocationAdvice(
+  capitalVnd: number,
+  positions: Record<string, number>,
+  health: PortfolioHealth,
+  regime: "Positive" | "Neutral" | "Defensive" | "High Risk",
+  discovery: DiscoveryStock[],
+  portfolioFitBySymbol: Record<string, WhatIfResult>
+): CapitalAllocationAdvice {
+  const cleanCap = Math.max(0, capitalVnd);
+  const activeEntries = Object.entries(positions).filter(([, v]) => v > 0);
+  const currentCount = activeEntries.length;
+
+  const isRiskyMkt = regime === "High Risk" || regime === "Defensive";
+  const recommendedCashPct =
+    regime === "High Risk" ? 45 : regime === "Defensive" ? 30 : regime === "Neutral" ? 20 : 10;
+
+  let tier: "SMALL" | "MEDIUM" | "LARGE" = "MEDIUM";
+  let tierTitle = "Vốn trung bình (50 – 300 triệu) • Lõi & Vệ tinh";
+  let recommendedCountLabel = "2 – 4 mã (2–3 ngành tương quan thấp)";
+  let maxIdealCount = 4;
+  let minIdealCount = 2;
+  let minPosSizeVnd = 25_000_000;
+
+  if (cleanCap < 50_000_000) {
+    tier = "SMALL";
+    tierTitle = "Vốn nhỏ (< 50 triệu) • Tập trung có kiểm soát";
+    recommendedCountLabel = "1 – 2 mã (Không dàn trải)";
+    maxIdealCount = 2;
+    minIdealCount = 1;
+    minPosSizeVnd = 15_000_000;
+  } else if (cleanCap > 300_000_000) {
+    tier = "LARGE";
+    tierTitle = "Vốn lớn (> 300 triệu) • Cân bằng rủi ro & Thanh khoản";
+    recommendedCountLabel = "4 – 7 mã (Đa ngành, kiểm soát HHI < 0.25)";
+    maxIdealCount = 7;
+    minIdealCount = 4;
+    minPosSizeVnd = 50_000_000;
+  }
+
+  const deployableBudget = Math.round(cleanCap * (1 - recommendedCashPct / 100));
+  const actionChecklist: string[] = [];
+  let shouldDiversifyMore = true;
+  let verdictBadge = "CÂN ĐỐI PHÂN BỔ";
+  let headline = "";
+  let rationale = "";
+
+  const sortedHoldings = [...activeEntries].sort((a, b) => b[1] - a[1]);
+  const smallestHoldings = [...activeEntries].sort((a, b) => a[1] - b[1]);
+  const topSectorEntry = Object.entries(health.sector_weights).sort((a, b) => b[1] - a[1])[0];
+
+  if (tier === "SMALL") {
+    shouldDiversifyMore = currentCount === 0;
+    if (currentCount >= 3) {
+      verdictBadge = "KHÔNG NÊN ĐA DẠNG HÓA THÊM";
+      headline = `Vốn ${(cleanCap / 1e6).toFixed(0)} triệu đang giữ ${currentCount} mã là quá dàn trải — nên thu gọn về 1–2 mã mạnh nhất.`;
+      rationale =
+        "Trên sàn HOSE/HNX quy định lô tối thiểu 100 cổ phiếu cùng chi phí giao dịch/thuế khứ hồi ~0.35%–0.40%. Khi vốn dưới 50 triệu mà chia nhiều hơn 2 mã, mỗi vị thế chỉ còn vài triệu đến dưới 15 triệu: dễ kẹt lô lẻ với các mã thị giá cao và hiệu suất sinh lời bị pha loãng gần như bằng 0. Với quy mô vốn nhỏ, công cụ phòng thủ hiệu quả nhất là giữ đệm Tiền mặt, chứ không phải mua nhiều mã.";
+      actionChecklist.push(
+        `Xem xét cơ cấu gom các vị thế nhỏ (${smallestHoldings
+          .slice(0, 2)
+          .map(([s]) => s)
+          .join(", ")}) để tập trung vào 1–2 cổ phiếu đầu ngành.`
+      );
+    } else if (currentCount === 2) {
+      verdictBadge = "ƯU TIÊN TẬP TRUNG (ĐÃ ĐỦ SỐ MÃ)";
+      headline = `Không cần mở thêm mã thứ 3 — hãy dồn vốn vào 2 vị thế hiện có (${sortedHoldings
+        .map(([s]) => s)
+        .join(", ")}).`;
+      rationale =
+        "Với vốn dưới 50 triệu, 2 mã là ngưỡng tối đa để vừa đảm bảo đủ lô tròn 100 CP, vừa tối ưu hóa biên lợi nhuận ròng sau phí. Thay vì mua thêm mã mới, hãy tăng tỷ trọng ở mã đang có Điểm PORI cao hơn khi thị trường thuận lợi.";
+      actionChecklist.push(
+        `Giữ tối đa 2 mã; giữ khoảng ${recommendedCashPct}% tiền mặt (~${((cleanCap * recommendedCashPct) / 100 / 1e6).toFixed(1)} triệu) làm bộ đệm quản trị rủi ro.`
+      );
+    } else {
+      verdictBadge = currentCount === 0 ? "CHỌN 1–2 MÃ TRỌNG TÂM" : "GIỮ TẬP TRUNG 1–2 MÃ";
+      headline =
+        currentCount === 0
+          ? `Với vốn ${(cleanCap / 1e6).toFixed(0)} triệu, chỉ nên giải ngân 1–2 cổ phiếu có Điểm PORI cao nhất.`
+          : `Đang cầm ${sortedHoldings[0]?.[0]} — có thể chọn tối đa 1 mã bổ trợ khác ngành nếu muốn cân bằng.`;
+      rationale =
+        "Quy mô vốn dưới 50 triệu phù hợp với chiến lược tập trung có chọn lọc để tối đa hóa hiệu quả trên từng lô giao dịch 100 cổ phiếu, kết hợp giữ đệm tiền mặt khi thị trường biến động.";
+      actionChecklist.push(
+        `Mỗi mã nên phân bổ tối thiểu ~${(minPosSizeVnd / 1e6).toFixed(0)} triệu để tránh vướng lô lẻ với các mã thị giá lớn.`
+      );
+    }
+  } else if (tier === "MEDIUM") {
+    if (currentCount > maxIdealCount) {
+      shouldDiversifyMore = false;
+      verdictBadge = "KHÔNG MỞ THÊM MÃ MỚI";
+      headline = `Đang giữ ${currentCount} mã với vốn ${(cleanCap / 1e6).toFixed(0)} triệu — đã vượt ngưỡng tối ưu (2–4 mã).`;
+      rationale =
+        "Danh mục đang có dấu hiệu loãng vốn (over-diversification). Giữ quá nhiều mã khiến bạn khó theo dõi sát diễn biến doanh nghiệp và biến động tổng danh mục tiệm cận chỉ số chung mà không tạo được lợi nhuận vượt trội.";
+      actionChecklist.push(
+        `Ngừng mua thêm mã mới; ưu tiên tỉa bớt các mã có tỷ trọng quá nhỏ (${smallestHoldings[0]?.[0]}) hoặc Điểm PORI thấp.`
+      );
+    } else if (topSectorEntry && topSectorEntry[1] > 0.48) {
+      shouldDiversifyMore = true;
+      verdictBadge = "NÊN ĐA DẠNG HÓA SANG NGÀNH KHÁC";
+      headline = `Ngành ${topSectorEntry[0]} đang chiếm ${(topSectorEntry[1] * 100).toFixed(0)}% tỷ trọng — nên bổ sung 1 mã khác ngành có tương quan thấp.`;
+      rationale =
+        "Vốn 50–300 triệu cho phép xây dựng cấu trúc Lõi–Vệ tinh gồm 2–4 mã. Đa dạng hóa sang 1 ngành khác giúp giảm mạnh VaR danh mục khi ngành chính gặp nhịp điều chỉnh, mà mỗi vị thế vẫn đủ lớn để sinh lời rõ nét.";
+      actionChecklist.push(
+        `Tránh mua thêm cổ phiếu thuộc ngành ${topSectorEntry[0]}; ưu tiên mã dẫn đầu ở nhóm ngành ít tương quan (ρ < 0.55).`
+      );
+    } else {
+      shouldDiversifyMore = currentCount < 3;
+      verdictBadge = currentCount < 3 ? "CÓ THỂ MỞ RỘNG 2–4 MÃ" : "CƠ CẤU ĐANG HỢP LÝ";
+      headline =
+        currentCount < 3
+          ? `Vốn ${(cleanCap / 1e6).toFixed(0)} triệu có thể phân bổ đều vào 2–4 mã thuộc 2–3 nhóm ngành khác nhau.`
+          : `Số lượng ${currentCount} mã hiện tại rất phù hợp với quy mô vốn trung bình.`;
+      rationale =
+        "Mỗi vị thế nên chiếm từ 20%–35% phần vốn cổ phiếu (tối thiểu 25–30 triệu/mã) để vừa kiểm soát rủi ro đơn lẻ vừa không bị loãng hiệu suất.";
+      actionChecklist.push(
+        `Chia ngân sách giải ngân (~${(deployableBudget / 1e6).toFixed(0)} triệu) cho tối đa ${maxIdealCount} mã, giữ ${recommendedCashPct}% tiền mặt.`
+      );
+    }
+  } else {
+    // LARGE > 300M
+    if (currentCount < minIdealCount || health.hhi_stock > 0.30) {
+      shouldDiversifyMore = true;
+      verdictBadge = "NÊN ĐA DẠNG HÓA & GIẢM TẬP TRUNG";
+      headline = `Vốn lớn (${(cleanCap / 1e6).toFixed(0)} triệu) nhưng chỉ giữ ${currentCount} mã (HHI=${health.hhi_stock.toFixed(2)}) — rủi ro tập trung cao.`;
+      rationale =
+        "Ở quy mô vốn trên 300 triệu, dồn vào 1–2 mã khiến chỉ một phiên giảm sàn -7% gây thiệt hại tuyệt đối rất lớn và dễ gặp trượt giá khi thoát hàng. Cần phân bổ sang 4–7 mã đa ngành để đưa HHI < 0.25.";
+      actionChecklist.push(
+        "Mục tiêu: mỗi mã không quá 25%–30% NAV và mỗi ngành không vượt quá 35%–40% tỷ trọng cổ phiếu."
+      );
+    } else {
+      shouldDiversifyMore = currentCount < maxIdealCount && (!topSectorEntry || topSectorEntry[1] > 0.38);
+      verdictBadge = "ĐA DẠNG HÓA CHUẨN ĐỊNH LƯỢNG";
+      headline = `Cấu trúc ${currentCount} mã phù hợp với vốn ${(cleanCap / 1e6).toFixed(0)} triệu; tập trung kiểm soát VaR 95% và độ sâu sổ lệnh.`;
+      rationale =
+        "Với quy mô vốn lớn, mọi quyết định mua thêm cần đối chiếu đồng thời 2 tiêu chí: giảm rủi ro biên (VaR) của danh mục và đủ thanh khoản 3 bước giá trên sổ lệnh để không bị trượt giá quá 0.15%.";
+      actionChecklist.push(
+        "Kiểm tra mục 04 (Thanh khoản & Khớp lệnh) trước khi đi lệnh trên 200 triệu/mã."
+      );
+    }
+  }
+
+  if (isRiskyMkt) {
+    actionChecklist.push(
+      `Thị trường đang ở trạng thái ${regime === "High Risk" ? "Rủi ro cao" : "Phòng thủ"}: Khuyến nghị giữ tối thiểu ${recommendedCashPct}% tiền mặt (~${((cleanCap * recommendedCashPct) / 100 / 1e6).toFixed(0)} triệu), chỉ giải ngân thăm dò từng phần.`
+    );
+  } else {
+    actionChecklist.push(
+      `Duy trì đệm tiền mặt khoảng ${recommendedCashPct}% (~${((cleanCap * recommendedCashPct) / 100 / 1e6).toFixed(0)} triệu) để linh hoạt tận dụng nhịp điều chỉnh.`
+    );
+  }
+
+  // Pick top 3 suggested candidates that are NOT dominating the same over-weighted sector
+  const heldSet = new Set(activeEntries.map(([s]) => s.toUpperCase()));
+  const overWeightSector = topSectorEntry && topSectorEntry[1] > 0.42 ? topSectorEntry[0] : null;
+  const targetSlots = Math.max(1, Math.min(maxIdealCount, currentCount === 0 ? Math.min(3, maxIdealCount) : 2));
+  const perSlotBudget = Math.max(minPosSizeVnd, Math.round(deployableBudget / Math.max(2, maxIdealCount)));
+
+  const scoredPool = discovery
+    .filter((d) => (d.alpha_score ?? 0) > 0)
+    .map((d) => {
+      const fit = portfolioFitBySymbol[d.symbol];
+      const secVn = vnSectorName(d.sector);
+      const penalty = overWeightSector && secVn === overWeightSector ? -18 : 0;
+      const alreadyBonus = !shouldDiversifyMore && heldSet.has(d.symbol) ? 20 : 0;
+      const composite =
+        (d.alpha_score ?? 50) * 0.5 + (fit?.portfolio_fit_score ?? 50) * 0.5 + penalty + alreadyBonus;
+      return { d, fit, secVn, composite };
+    })
+    .sort((a, b) => b.composite - a.composite)
+    .slice(0, 3);
+
+  const suggestedCandidates = scoredPool.map(({ d, fit, secVn }) => ({
+    symbol: d.symbol,
+    sector: secVn,
+    poriScore: d.alpha_score ?? 0,
+    fitScore: fit?.portfolio_fit_score ?? 50,
+    avgCorr: fit?.avg_corr_with_portfolio ?? 0,
+    suggestedAmountVnd: Math.min(deployableBudget, Math.max(minPosSizeVnd, Math.round(perSlotBudget / 1_000_000) * 1_000_000)),
+    reason:
+      heldSet.has(d.symbol) && !shouldDiversifyMore
+        ? `Gia tăng vị thế đang có (${secVn}) thay vì mở mã mới để tránh loãng vốn.`
+        : `Ngành ${secVn} • Tương quan danh mục ρ=${(fit?.avg_corr_with_portfolio ?? 0).toFixed(2)} • Phù hợp bổ sung (${targetSlots} vị thế).`,
+  }));
+
+  return {
+    capitalVnd: cleanCap,
+    tier,
+    tierTitle,
+    recommendedCountLabel,
+    minPosSizeVnd,
+    currentCount,
+    recommendedCashPct,
+    verdictBadge,
+    shouldDiversifyMore,
+    headline,
+    rationale,
+    suggestedCandidates,
+    actionChecklist,
   };
 }
