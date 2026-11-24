@@ -46,7 +46,7 @@ import {
 
 const LOCAL_WORKSPACE_KEY = "pori_guest_workspace_v1";
 
-type TabId = "regime" | "discovery" | "portfolio" | "orderbook" | "validation";
+type TabId = "regime" | "discovery" | "portfolio" | "orderbook" | "validation" | "guide";
 
 const MONO = "'JetBrains Mono', monospace";
 const DISPLAY = "'Be Vietnam Pro', sans-serif";
@@ -1394,15 +1394,16 @@ export default function HomePage() {
     border: "none",
     borderBottom: `2px solid ${isActive ? "var(--g)" : "transparent"}`,
     cursor: "pointer",
-    padding: "8px 2px",
+    padding: "7px 2px",
     color: isActive ? "var(--ink)" : "var(--mut)",
     fontFamily: MONO,
-    fontSize: 11.5,
-    fontWeight: isActive ? 700 : 500,
-    letterSpacing: ".06em",
+    fontSize: 10.5,
+    fontWeight: isActive ? 800 : 600,
+    letterSpacing: ".03em",
     textTransform: "uppercase",
     transition: "color .2s, border-color .2s",
     whiteSpace: "nowrap",
+    flexShrink: 0,
   });
 
   const chipBtnStyle: React.CSSProperties = {
@@ -1410,83 +1411,93 @@ export default function HomePage() {
     border: "1px solid var(--bd)",
     color: "var(--ink)",
     fontFamily: MONO,
-    fontSize: 10.5,
+    fontSize: 10,
     fontWeight: 600,
-    letterSpacing: ".06em",
-    padding: "6px 10px",
-    borderRadius: 8,
+    letterSpacing: ".04em",
+    padding: "5px 9px",
+    borderRadius: 7,
     cursor: "pointer",
+    whiteSpace: "nowrap",
   };
+
+  const shortRegimeBadge =
+    regime.regime === "High Risk"
+      ? "RỦI RO CAO"
+      : regime.regime === "Defensive"
+      ? "PHÒNG THỦ"
+      : regime.regime === "Positive"
+      ? "TÍCH CỰC"
+      : "TRUNG TÍNH";
 
   return (
     <div style={{ position: "relative", minHeight: "100dvh", background: "var(--bg)", color: "var(--ink)" }}>
-      {/* Pointer-Reactive Ambient Glow & Tech Grid from SALX */}
+      {/* Pointer-Reactive Ambient Glow & Tech Grid */}
       <CursorAmbientGlow />
 
-      {/* ── SALX 3-COLUMN STICKY HEADER ── */}
+      {/* ── SLEEK SINGLE-ROW STICKY HEADER ── */}
       <header className="app-hdr">
         {/* Col 1 — Brand */}
         <div
           onClick={() => setActiveTab("regime")}
-          style={{ display: "flex", alignItems: "center", gap: 10, cursor: "pointer" }}
+          style={{ display: "flex", alignItems: "center", gap: 9, cursor: "pointer", flexShrink: 0 }}
         >
           <span
             style={{
               display: "grid",
               placeItems: "center",
-              width: 30,
-              height: 30,
+              width: 28,
+              height: 28,
               borderRadius: 8,
               background: "var(--gb)",
               border: "1px solid var(--gd)",
               color: "var(--g)",
               fontFamily: MONO,
               fontWeight: 800,
-              fontSize: 14,
+              fontSize: 13,
             }}
           >
             ◆
           </span>
-          <div>
-            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-              <span
-                style={{
-                  fontFamily: DISPLAY,
-                  fontWeight: 800,
-                  fontSize: 20,
-                  letterSpacing: "-.03em",
-                  color: "var(--ink)",
-                }}
-              >
-                PORI
-              </span>
-              <span
-                style={{
-                  fontFamily: MONO,
-                  fontSize: 9,
-                  fontWeight: 700,
-                  letterSpacing: ".1em",
-                  padding: "2px 7px",
-                  borderRadius: 4,
-                  background: "var(--gb)",
-                  color: "var(--g)",
-                  border: "1px solid var(--gd)",
-                }}
-              >
-                QUANT COCKPIT
-              </span>
-            </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
+            <span
+              style={{
+                fontFamily: DISPLAY,
+                fontWeight: 800,
+                fontSize: 19,
+                letterSpacing: "-.03em",
+                color: "var(--ink)",
+              }}
+            >
+              PORI
+            </span>
+            <span
+              style={{
+                fontFamily: MONO,
+                fontSize: 8.5,
+                fontWeight: 700,
+                letterSpacing: ".08em",
+                padding: "2px 6px",
+                borderRadius: 4,
+                background: "var(--gb)",
+                color: "var(--g)",
+                border: "1px solid var(--gd)",
+                whiteSpace: "nowrap",
+              }}
+            >
+              ĐỊNH LƯỢNG & RỦI RO
+            </span>
           </div>
         </div>
 
-        {/* Col 2 — Centered Mono Uppercase Nav Links */}
+        {/* Col 2 — Centered Single-Row Nav Links */}
         <nav className="app-hdr-nav" aria-label="Main">
           {[
-            { id: "regime", label: "01. Tổng Quan Thị Trường" },
-            { id: "discovery", label: "02. Bộ Lọc Cổ Phiếu" },
-            { id: "portfolio", label: "03. Quản Trị Danh Mục" },
-            { id: "orderbook", label: "04. Thanh Khoản & Khớp Lệnh" },
-            { id: "validation", label: "05. Hiệu Quả & Dữ Liệu" },
+            { id: "regime", label: "01. Thị Trường" },
+            { id: "discovery", label: "02. Lọc Cổ Phiếu" },
+            { id: "portfolio", label: "03. Danh Mục & Vốn" },
+            { id: "orderbook", label: "04. Sổ Lệnh" },
+            { id: "validation", label: "05. Kiểm Định" },
+            { id: "guide", label: "06. Hướng Dẫn" },
           ].map((tab) => (
             <button
               key={tab.id}
@@ -1498,41 +1509,44 @@ export default function HomePage() {
           ))}
         </nav>
 
-        {/* Col 3 — Status Chips, Auth & Theme Toggle */}
+        {/* Col 3 — Compact Status Chips, Auth & Theme Toggle */}
         <div className="app-hdr-actions">
           <span
+            title={`Trạng thái thị trường: ${vnRegime(regime.regime)}`}
             style={{
               display: "inline-flex",
               alignItems: "center",
-              gap: 6,
+              gap: 5,
               fontFamily: MONO,
-              fontSize: 10.5,
-              letterSpacing: ".06em",
+              fontSize: 10,
+              letterSpacing: ".04em",
               fontWeight: 700,
               color: isRiskRegime ? "var(--avax)" : "var(--g)",
               background: isRiskRegime ? "var(--avax-bg)" : "var(--gb)",
               border: `1px solid ${isRiskRegime ? "var(--avax-bd)" : "var(--gd)"}`,
-              borderRadius: 8,
-              padding: "6px 10px",
+              borderRadius: 7,
+              padding: "5px 8px",
+              whiteSpace: "nowrap",
             }}
           >
             <span>▲</span>
-            {vnRegime(regime.regime).toUpperCase()}
+            {shortRegimeBadge}
           </span>
 
           <button
             onClick={() => setAutoRefresh((v) => !v)}
+            title="Tự động đồng bộ dữ liệu mỗi 60 giây"
             style={{
               ...chipBtnStyle,
               borderColor: autoRefresh ? "var(--gd)" : "var(--bd)",
               color: autoRefresh ? "var(--g)" : "var(--mut)",
             }}
           >
-            ĐỒNG BỘ: {autoRefresh ? "BẬT" : "TẮT"}
+            AUTO: {autoRefresh ? "BẬT" : "TẮT"}
           </button>
 
           <button onClick={fetchLatestBundle} disabled={refreshing} style={chipBtnStyle} title="Làm mới dữ liệu thị trường">
-            <span style={{ display: "inline-flex", alignItems: "center", gap: 5 }}>
+            <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
               <RefreshCw className={`h-3 w-3 ${refreshing ? "animate-spin" : ""}`} />
               {bundle.latest_trading_date}
             </span>
@@ -1540,19 +1554,20 @@ export default function HomePage() {
 
           <button
             onClick={() => setDarkMode((v) => !v)}
+            title="Chuyển giao diện Sáng / Tối"
             style={{ ...chipBtnStyle, color: "var(--mut)" }}
           >
             {darkMode ? "SÁNG" : "TỐI"}
           </button>
 
           {authUser ? (
-            <div className="inline-flex items-center gap-1.5">
+            <div className="inline-flex items-center gap-1">
               <span
                 style={{
                   ...chipBtnStyle,
                   display: "inline-flex",
                   alignItems: "center",
-                  gap: 5,
+                  gap: 4,
                   borderColor: "var(--gd)",
                   background: "var(--gb)",
                   color: "var(--g)",
@@ -1561,19 +1576,16 @@ export default function HomePage() {
                 title={
                   cloudSyncState === "saving"
                     ? "Đang đồng bộ danh mục lên tài khoản..."
-                    : "Đã lưu an toàn vào tài khoản Email của bạn"
+                    : `Đã lưu vào ${authUser.email}`
                 }
               >
                 <UserCheck className="h-3 w-3" />
                 {authUser.email?.split("@")[0]}
-                <span style={{ opacity: 0.75, fontSize: 9 }}>
-                  {cloudSyncState === "saving" ? "• ĐANG LƯU" : "• ĐÃ LƯU"}
-                </span>
               </span>
               <button
                 onClick={handleSignOut}
                 title="Đăng xuất tài khoản"
-                style={{ ...chipBtnStyle, color: "var(--mut)", padding: "6px 8px" }}
+                style={{ ...chipBtnStyle, color: "var(--mut)", padding: "5px 7px" }}
               >
                 <LogOut className="h-3.5 w-3.5" />
               </button>
@@ -1589,7 +1601,7 @@ export default function HomePage() {
                 ...chipBtnStyle,
                 display: "inline-flex",
                 alignItems: "center",
-                gap: 5,
+                gap: 4,
                 background: "var(--g)",
                 color: "var(--g-contrast)",
                 borderColor: "var(--g)",
@@ -1597,8 +1609,8 @@ export default function HomePage() {
               }}
               title="Đăng nhập bằng Email để lưu danh mục & lịch sử mô phỏng cho các lần truy cập sau"
             >
-              <LogIn className="h-3.5 w-3.5" />
-              ĐĂNG NHẬP LƯU
+              <LogIn className="h-3 w-3" />
+              ĐĂNG NHẬP
             </button>
           )}
         </div>
@@ -1612,41 +1624,65 @@ export default function HomePage() {
           zIndex: 1,
           maxWidth: 1480,
           margin: "0 auto",
-          padding: "28px clamp(16px, 3vw, 36px) 80px",
+          padding: "24px clamp(16px, 3vw, 36px) 80px",
         }}
       >
-        {/* EDITORIAL PAGE HEADER + MARKET BRIEF */}
+        {/* EDITORIAL PAGE HEADER + WHAT IS PORI + MARKET BRIEF */}
         <div
           style={{
             display: "grid",
-            gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))",
+            gridTemplateColumns: "repeat(auto-fit, minmax(340px, 1fr))",
             alignItems: "end",
-            gap: 24,
-            marginBottom: 24,
-            paddingBottom: 20,
+            gap: 22,
+            marginBottom: 22,
+            paddingBottom: 18,
             borderBottom: "1px solid var(--bd)",
           }}
         >
           <div>
-            <span
-              style={{
-                fontFamily: MONO,
-                fontSize: 9.5,
-                fontWeight: 700,
-                letterSpacing: ".14em",
-                textTransform: "uppercase",
-                color: "var(--g)",
-              }}
-            >
-              VPBANKS NEO API × SSI FASTCONNECT V3 / {bundle.sessions_count} PHIÊN DỮ LIỆU •{" "}
-              {authUser ? `TÀI KHOẢN: ${authUser.email}` : "DÙNG THỬ TỰ DO (LƯU TẠM TRÊN MÁY)"}
-            </span>
+            <div className="flex flex-wrap items-center gap-2">
+              <span
+                style={{
+                  fontFamily: MONO,
+                  fontSize: 9.5,
+                  fontWeight: 700,
+                  letterSpacing: ".12em",
+                  textTransform: "uppercase",
+                  color: "var(--g)",
+                }}
+              >
+                PORI — CÔNG CỤ ĐỊNH LƯỢNG & QUẢN TRỊ RỦI RO DANH MỤC • {bundle.sessions_count} PHIÊN DỮ LIỆU
+              </span>
+              {activeTab !== "guide" && (
+                <button
+                  onClick={() => setActiveTab("guide")}
+                  style={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: 4,
+                    fontFamily: MONO,
+                    fontSize: 9,
+                    fontWeight: 700,
+                    padding: "2px 8px",
+                    borderRadius: 99,
+                    background: "var(--gb)",
+                    border: "1px solid var(--gd)",
+                    color: "var(--g)",
+                    cursor: "pointer",
+                  }}
+                >
+                  <BookOpen className="h-3 w-3" />
+                  HƯỚNG DẪN NGƯỜI MỚI ↗
+                </button>
+              )}
+            </div>
+
             <h1
               style={{
                 fontFamily: DISPLAY,
                 fontWeight: 800,
-                fontSize: "clamp(26px, 3.2vw, 42px)",
-                lineHeight: 1.04,
+                fontSize: "clamp(25px, 3vw, 38px)",
+                lineHeight: 1.08,
                 letterSpacing: "-.025em",
                 margin: "8px 0 0",
                 color: "var(--ink)",
@@ -1657,7 +1693,15 @@ export default function HomePage() {
               {activeTab === "portfolio" && "Quản Trị Rủi Ro Danh Mục & Cố Vấn Phân Bổ Vốn"}
               {activeTab === "orderbook" && "Thanh Khoản Sổ Lệnh 3 Bước Giá & Ước Tính Trượt Giá"}
               {activeTab === "validation" && "Hiệu Quả Kiểm Định Mô Hình & Dữ Liệu Nguồn"}
+              {activeTab === "guide" && "Hướng Dẫn Sử Dụng PORI Cho Người Mới Bắt Đầu"}
             </h1>
+
+            <p style={{ margin: "8px 0 0", fontSize: 12.5, color: "var(--mut)", lineHeight: 1.55, maxWidth: 650 }}>
+              <strong style={{ color: "var(--ink)" }}>PORI là gì?</strong> Là hệ thống phân tích định lượng chứng khoán Việt Nam
+              kết nối dữ liệu <strong style={{ color: "var(--ink)" }}>VPBankS NEO & SSI v3</strong>: giúp xác định xu hướng
+              thị trường, xếp hạng cổ phiếu theo <strong style={{ color: "var(--g)" }}>Điểm PORI (0–100)</strong>, tư vấn cấu
+              trúc vốn &amp; đo lường rủi ro <strong style={{ color: "var(--ink)" }}>VaR/ES</strong> trước khi xuống tiền.
+            </p>
           </div>
 
           {/* Quick Session Brief Banner */}
@@ -4000,6 +4044,204 @@ export default function HomePage() {
                       {item.q}
                     </div>
                     <p style={{ margin: 0, color: "var(--mut)", lineHeight: 1.55 }}>{item.a}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* =====================================================================
+            SCREEN 6: BEGINNER GUIDE & PORI GLOSSARY
+           ===================================================================== */}
+        {activeTab === "guide" && (
+          <div className="space-y-6">
+            {/* Hero Intro Card: PORI là gì? */}
+            <div className="salx-card p-6" style={{ borderColor: "var(--gd)" }}>
+              <SectionLabel>01 / PORI LÀ GÌ & GIẢI QUYẾT VẤN ĐỀ GÌ CHO NHÀ ĐẦU TƯ?</SectionLabel>
+              <div className="grid gap-5 lg:grid-cols-12">
+                <div className="lg:col-span-7 space-y-3">
+                  <h2 style={{ fontFamily: DISPLAY, fontSize: 22, fontWeight: 800, margin: 0 }}>
+                    PORI = Portfolio (Danh mục) + Risk (Quản trị rủi ro)
+                  </h2>
+                  <p style={{ margin: 0, fontSize: 13.5, color: "var(--mut)", lineHeight: 1.65 }}>
+                    Hầu hết các công cụ chứng khoán thông thường chỉ trả lời câu hỏi{" "}
+                    <strong style={{ color: "var(--ink)" }}>“Mã nào đang tăng mạnh?”</strong> mà bỏ qua rủi ro thực tế của
+                    người mua. <strong style={{ color: "var(--g)" }}>PORI</strong> là{" "}
+                    <strong style={{ color: "var(--ink)" }}>Công cụ Định lượng &amp; Quản trị Rủi ro Danh mục</strong> giúp
+                    bạn trả lời đủ 3 câu hỏi trước khi đặt lệnh:
+                  </p>
+                  <div className="grid gap-2.5 sm:grid-cols-3 text-xs pt-1">
+                    <div className="salx-sub p-3">
+                      <div style={{ fontFamily: MONO, fontWeight: 800, color: "var(--g)" }}>1. CÓ NÊN MUA LÚC NÀY?</div>
+                      <p style={{ margin: "4px 0 0", color: "var(--mut)", lineHeight: 1.5 }}>
+                        Đọc 3 trụ cột VNINDEX &amp; dòng tiền nhóm ngành để biết nên tấn công hay giữ tiền mặt.
+                      </p>
+                    </div>
+                    <div className="salx-sub p-3">
+                      <div style={{ fontFamily: MONO, fontWeight: 800, color: "var(--cyan)" }}>2. MUA CÓ HỢP VỐN &amp; DANH MỤC?</div>
+                      <p style={{ margin: "4px 0 0", color: "var(--mut)", lineHeight: 1.5 }}>
+                        Kiểm tra mã đó làm tăng hay giảm VaR danh mục, và vốn nhỏ có nên chia nhiều mã hay không.
+                      </p>
+                    </div>
+                    <div className="salx-sub p-3">
+                      <div style={{ fontFamily: MONO, fontWeight: 800, color: "var(--org)" }}>3. KHỚP LỆNH CÓ BỊ TRƯỢT GIÁ?</div>
+                      <p style={{ margin: "4px 0 0", color: "var(--mut)", lineHeight: 1.5 }}>
+                        Soi trực tiếp 3 bước giá Bid/Ask để biết lệnh lớn có bị đội giá hoặc thiếu thanh khoản không.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="lg:col-span-5 salx-sub p-4 space-y-2.5">
+                  <div style={{ fontFamily: MONO, fontSize: 10.5, fontWeight: 800, color: "var(--g)" }}>
+                    LƯU Ý CHO NGƯỜI DÙNG MỚI &amp; TÀI KHOẢN LƯU TRỮ
+                  </div>
+                  <div className="space-y-2 text-xs" style={{ color: "var(--mut)", lineHeight: 1.55 }}>
+                    <div>
+                      • <strong style={{ color: "var(--ink)" }}>Không cần đăng nhập để dùng thử:</strong> Mọi tính năng (lọc mã, sửa danh mục, mô phỏng, soi sổ lệnh) đều mở sẵn 100% và tự lưu tạm trên trình duyệt của bạn.
+                    </div>
+                    <div>
+                      • <strong style={{ color: "var(--ink)" }}>Khi muốn lưu lâu dài &amp; mở trên máy khác:</strong> Bấm nút{" "}
+                      <strong style={{ color: "var(--g)" }}>ĐĂNG NHẬP</strong> ở góc phải trên cùng, tạo tài khoản bằng Email + Mật khẩu. Hệ thống sẽ tự động lưu danh mục và lịch sử kịch bản của riêng bạn.
+                    </div>
+                  </div>
+                  {!authUser && (
+                    <button
+                      onClick={() => setAuthModalOpen(true)}
+                      style={{
+                        marginTop: 6,
+                        fontFamily: MONO,
+                        fontSize: 10,
+                        fontWeight: 700,
+                        padding: "7px 12px",
+                        borderRadius: 6,
+                        border: "1px solid var(--gd)",
+                        background: "var(--gb)",
+                        color: "var(--g)",
+                        cursor: "pointer",
+                      }}
+                    >
+                      ĐĂNG NHẬP / TẠO TÀI KHOẢN EMAIL ↗
+                    </button>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            {/* 4-Step Beginner Workflow */}
+            <div className="salx-card p-6">
+              <SectionLabel>02 / QUY TRÌNH 4 BƯỚC SỬ DỤNG HIỆU QUẢ CHO NGƯỜI MỚI</SectionLabel>
+              <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+                {[
+                  {
+                    step: "BƯỚC 1",
+                    tab: "regime" as TabId,
+                    title: "Xem Nhịp Thị Trường & Ngành",
+                    detail:
+                      "Kiểm tra VNINDEX đang ở trạng thái Tích cực, Trung tính hay Rủi ro cao. Kéo hoặc lăn chuột trên đồ thị để xem lịch sử, bấm nút Giải thích ở 3 trụ cột và rê chuột vào Bảng xếp hạng nhóm ngành để tìm ngành dẫn dắt.",
+                    btn: "MỞ 01. THỊ TRƯỜNG →",
+                  },
+                  {
+                    step: "BƯỚC 2",
+                    tab: "discovery" as TabId,
+                    title: "Lọc Cổ Phiếu Theo Điểm PORI",
+                    detail:
+                      "Lọc theo nhóm ngành hoặc kéo thanh Điểm PORI (nên ưu tiên từ 65–70+ trở lên). Bấm vào từng mã để xem Hồ sơ 360° bên phải gồm đồ thị 60 phiên, lý do lọt top và liên kết BCTC gốc.",
+                    btn: "MỞ 02. LỌC CỔ PHIẾU →",
+                  },
+                  {
+                    step: "BƯỚC 3",
+                    tab: "portfolio" as TabId,
+                    title: "Nhập Vốn & Mô Phỏng What-If",
+                    detail:
+                      "Bấm 'Bắt đầu từ tiền mặt' để tự nhập mã bạn đang cầm (theo số cổ phiếu lô 100 hoặc số tiền), nhập tổng vốn bản thân có để nhận tư vấn số mã tối ưu, rồi chạy Mô phỏng 5 chiều trước khi bấm mua.",
+                    btn: "MỞ 03. DANH MỤC & VỐN →",
+                  },
+                  {
+                    step: "BƯỚC 4",
+                    tab: "orderbook" as TabId,
+                    title: "Kiểm Tra Độ Sâu Sổ Lệnh",
+                    detail:
+                      "Chọn mã định mua và nhập số tiền giải ngân dự kiến để kiểm tra 3 bước giá Bid/Ask, chỉ số cân bằng OBI và độ trượt giá ước tính trước khi đặt lệnh thực tế trên app chứng khoán.",
+                    btn: "MỞ 04. SỔ LỆNH →",
+                  },
+                ].map((s) => (
+                  <div key={s.step} className="salx-sub p-4 flex flex-col justify-between gap-3">
+                    <div>
+                      <span
+                        style={{
+                          fontFamily: MONO,
+                          fontSize: 9.5,
+                          fontWeight: 800,
+                          color: "var(--g)",
+                          letterSpacing: ".08em",
+                        }}
+                      >
+                        {s.step}
+                      </span>
+                      <h3 style={{ fontFamily: DISPLAY, fontSize: 16, fontWeight: 800, margin: "4px 0 8px" }}>
+                        {s.title}
+                      </h3>
+                      <p style={{ margin: 0, fontSize: 12, color: "var(--mut)", lineHeight: 1.55 }}>{s.detail}</p>
+                    </div>
+                    <button
+                      onClick={() => setActiveTab(s.tab)}
+                      style={{
+                        fontFamily: MONO,
+                        fontSize: 10,
+                        fontWeight: 700,
+                        padding: "7px 10px",
+                        borderRadius: 6,
+                        border: "1px solid var(--gd)",
+                        background: "var(--gb)",
+                        color: "var(--g)",
+                        cursor: "pointer",
+                        textAlign: "left",
+                      }}
+                    >
+                      {s.btn}
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Glossary */}
+            <div className="salx-card p-6">
+              <SectionLabel>03 / TỪ ĐIỂN NHANH CÁC CHỈ SỐ TRÊN PORI</SectionLabel>
+              <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3 text-xs">
+                {[
+                  {
+                    term: "Điểm PORI (0 – 100)",
+                    desc: "Điểm tổng hợp xếp hạng sức mạnh cổ phiếu từ 4 nhóm: Xu hướng & Động lượng (35%), Thanh khoản & Sổ lệnh (25%), Dòng tiền Khối ngoại (15%) và Cơ bản Doanh nghiệp (25%).",
+                  },
+                  {
+                    term: "VaR 95% & ES 95% (1 ngày)",
+                    desc: "VaR 95% ước tính mức lỗ tối đa trong 1 ngày ở điều kiện thông thường (95% số phiên). ES 95% là mức lỗ trung bình nếu rơi vào 5% số phiên xấu nhất.",
+                  },
+                  {
+                    term: "Chỉ số tập trung HHI (0 → 1)",
+                    desc: "Đo mức độ dồn vốn vào ít mã. HHI càng gần 1 là quá tập trung (VD: dồn hết vào 1 mã = 1.0); HHI < 0.25 nghĩa là danh mục cân đối từ 4 mã trở lên.",
+                  },
+                  {
+                    term: "Độ Phù Hợp Danh Mục (0 – 100)",
+                    desc: "Đánh giá xem việc mua thêm mã X có giúp giảm rủi ro VaR và đa dạng hóa tương quan cho danh mục hiện tại của bạn hay không.",
+                  },
+                  {
+                    term: "Tương quan ρ (Correlation)",
+                    desc: "Đo mức độ 'tăng giảm cùng nhịp' giữa 2 cổ phiếu (-1 đến +1). Nên phối hợp các mã có ρ < 0.55 (khác ngành) để đỡ bị giảm đồng loạt.",
+                  },
+                  {
+                    term: "OBI & Trượt giá 3 bước giá",
+                    desc: "OBI dương nghĩa là lực kê mua 3 bước giá Bid áp đảo lực bán Ask. Độ trượt giá cho biết mức chênh lệch giá bình quân phải trả thêm khi quét nhiều bước giá.",
+                  },
+                ].map((g) => (
+                  <div key={g.term} className="salx-sub p-3.5">
+                    <div style={{ fontFamily: MONO, fontWeight: 800, color: "var(--g)", marginBottom: 4 }}>
+                      {g.term}
+                    </div>
+                    <p style={{ margin: 0, color: "var(--mut)", lineHeight: 1.55 }}>{g.desc}</p>
                   </div>
                 ))}
               </div>

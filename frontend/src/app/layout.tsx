@@ -2,9 +2,9 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "PORI — Trạm Định Lượng & Quản Trị Rủi Ro Danh Mục",
+  title: "PORI — Công Cụ Định Lượng & Quản Trị Rủi Ro Danh Mục",
   description:
-    "Pori (Portfolio + Risk) — Hệ thống phân tích bối cảnh thị trường, tầm soát cổ phiếu định lượng gắn với quản trị rủi ro danh mục (VPBankS NEO API & SSI FastConnect v3).",
+    "PORI (Portfolio + Risk) — Công cụ phân tích định lượng cổ phiếu, chấm điểm đa nhân tố và quản trị rủi ro danh mục chứng khoán Việt Nam (VPBankS NEO API & SSI FastConnect v3).",
 };
 
 export default function RootLayout({
