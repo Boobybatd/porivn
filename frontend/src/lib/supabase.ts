@@ -70,3 +70,18 @@ export async function saveCloudWorkspace(
   if (error) return { ok: false, error: error.message };
   return { ok: true };
 }
+
+export async function fetchLiveSnapshotFromSupabase<T extends { generated_at?: string }>(): Promise<T | null> {
+  if (!supabase) return null;
+  try {
+    const { data, error } = await supabase
+      .from("pori_live_snapshots")
+      .select("generated_at, payload")
+      .eq("id", "latest")
+      .maybeSingle();
+    if (error || !data || !data.payload) return null;
+    return data.payload as T;
+  } catch {
+    return null;
+  }
+}

@@ -37,6 +37,7 @@ import {
   vnSectorName,
 } from "@/lib/quant";
 import {
+  fetchLiveSnapshotFromSupabase,
   isSupabaseConfigured,
   loadCloudWorkspace,
   saveCloudWorkspace,
@@ -923,7 +924,7 @@ export default function HomePage() {
   const [error, setError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<TabId>("regime");
   const [darkMode, setDarkMode] = useState<boolean>(true);
-  const [autoRefresh, setAutoRefresh] = useState(false);
+  const [autoRefresh, setAutoRefresh] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
   // Sync [data-theme="light"] on <html> exactly like SALX ThemeContext
@@ -998,9 +999,21 @@ export default function HomePage() {
   const fetchLatestBundle = async () => {
     setRefreshing(true);
     try {
-      const snapRes = await fetch(`/data/snapshot.json?t=${Date.now()}`);
-      if (!snapRes.ok) throw new Error("Không tìm thấy dữ liệu snapshot.json");
-      const loaded: SnapshotBundle = await snapRes.json();
+      const [snapRes, liveCloud] = await Promise.all([
+        fetch(`/data/snapshot.json?t=${Date.now()}`),
+        fetchLiveSnapshotFromSupabase<SnapshotBundle>(),
+      ]);
+      if (!snapRes.ok && !liveCloud) throw new Error("Không tìm thấy dữ liệu snapshot.json");
+      const staticLoaded: SnapshotBundle | null = snapRes.ok ? await snapRes.json() : null;
+
+      let loaded: SnapshotBundle;
+      if (liveCloud && staticLoaded) {
+        const cloudTs = Date.parse(liveCloud.generated_at || "") || 0;
+        const staticTs = Date.parse(staticLoaded.generated_at || "") || 0;
+        loaded = cloudTs >= staticTs ? liveCloud : staticLoaded;
+      } else {
+        loaded = (liveCloud || staticLoaded)!;
+      }
       setBundle(loaded);
 
       if (!workspaceInitializedRef.current) {
@@ -1177,7 +1190,7 @@ export default function HomePage() {
 
   useEffect(() => {
     if (!autoRefresh) return;
-    const id = setInterval(fetchLatestBundle, 60_000);
+    const id = setInterval(fetchLatestBundle, 30_000);
     return () => clearInterval(id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [autoRefresh]);
