@@ -67,13 +67,32 @@ def build_orderbook_snapshot_for_symbol(
     neo_snap: Optional[Dict[str, Any]],
 ) -> Dict[str, Any]:
     """Return 3-level Bid/Ask snapshot from NEO API if available, else calibrated EOD reference book."""
-    if neo_snap and neo_snap.get("bid_price_1") and neo_snap.get("ask_price_1"):
+    if neo_snap and (
+        (neo_snap.get("bid_price_1") or neo_snap.get("bid_price_2"))
+        and (neo_snap.get("ask_price_1") or neo_snap.get("ask_price_2"))
+    ):
         return {
             "source": "NEO_API_LIVE",
-            "bid_prices": [neo_snap.get("bid_price_1"), neo_snap.get("bid_price_2"), neo_snap.get("bid_price_3")],
-            "bid_vols": [neo_snap.get("bid_vol_1") or 0, neo_snap.get("bid_vol_2") or 0, neo_snap.get("bid_vol_3") or 0],
-            "ask_prices": [neo_snap.get("ask_price_1"), neo_snap.get("ask_price_2"), neo_snap.get("ask_price_3")],
-            "ask_vols": [neo_snap.get("ask_vol_1") or 0, neo_snap.get("ask_vol_2") or 0, neo_snap.get("ask_vol_3") or 0],
+            "bid_prices": [
+                float(neo_snap.get("bid_price_1") or 0.0),
+                float(neo_snap.get("bid_price_2") or 0.0),
+                float(neo_snap.get("bid_price_3") or 0.0),
+            ],
+            "bid_vols": [
+                float(neo_snap.get("bid_vol_1") or 0.0),
+                float(neo_snap.get("bid_vol_2") or 0.0),
+                float(neo_snap.get("bid_vol_3") or 0.0),
+            ],
+            "ask_prices": [
+                float(neo_snap.get("ask_price_1") or 0.0),
+                float(neo_snap.get("ask_price_2") or 0.0),
+                float(neo_snap.get("ask_price_3") or 0.0),
+            ],
+            "ask_vols": [
+                float(neo_snap.get("ask_vol_1") or 0.0),
+                float(neo_snap.get("ask_vol_2") or 0.0),
+                float(neo_snap.get("ask_vol_3") or 0.0),
+            ],
         }
 
     step = hose_tick_size(last_close)
@@ -252,7 +271,7 @@ def build_full_snapshot_bundle(
         no_change = int(neo_mkt.get("no_change") or 0)
         src_label = "NEO API" if "NEO" in str(neo_mkt.get("source", "")) else "SSI FastConnect v3"
         breadth_scope = f"Toàn chỉ số VNINDEX ({src_label})"
-        foreign_net = 0.0
+        foreign_net = sum(float(s.get("foreign_net_val") or 0.0) for s in neo_stocks.values())
     else:
         advances = int((latest_c[universe_syms] > prev_c[universe_syms]).sum())
         declines = int((latest_c[universe_syms] < prev_c[universe_syms]).sum())

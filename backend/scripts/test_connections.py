@@ -94,7 +94,9 @@ def test_neo_rest(token: str) -> None:
 
 async def test_neo_ws(token: str) -> None:
     print("\n=== 4. KIỂM TRA NEO WEBSOCKET (/stock-stream/broker) ===")
-    ws_url = os.getenv("NEO_WS_URL", "ws://neoapi.vpbanks.com.vn/stock-stream/broker").strip()
+    ws_url = os.getenv("NEO_WS_URL", "wss://neoapi.vpbanks.com.vn/stock-stream/broker").strip()
+    if ws_url.startswith("ws://"):
+        ws_url = "wss://" + ws_url[len("ws://") :]
     try:
         async with websockets.connect(ws_url, open_timeout=10) as ws:
             await ws.send(json.dumps({"action": "auth", "data": token}))
@@ -115,7 +117,7 @@ async def test_neo_ws(token: str) -> None:
             except asyncio.TimeoutError:
                 print("  [INFO] Hết giờ chờ (ngoài giờ giao dịch có thể chưa có tick mới).")
     except Exception as exc:
-        print(f"  [ERROR] Lỗi WebSocket: {exc}")
+        print(f"  [ERROR] Lỗi WebSocket: {repr(exc)}")
 
 
 def test_ssi_fastconnect() -> None:

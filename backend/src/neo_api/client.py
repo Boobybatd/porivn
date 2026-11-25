@@ -36,7 +36,10 @@ class NeoAPIClient:
         load_dotenv(ROOT_DIR / ".env")
         self.auth_url = os.getenv("NEO_AUTH_URL", "https://external.vpbanks.com.vn/auth/token").strip()
         self.base_url = os.getenv("NEO_API_BASE_URL", "https://neoapi.vpbanks.com.vn/neo-api").rstrip("/")
-        self.ws_url = os.getenv("NEO_WS_URL", "wss://neoapi.vpbanks.com.vn/stock-stream/broker").strip()
+        ws_raw = os.getenv("NEO_WS_URL", "wss://neoapi.vpbanks.com.vn/stock-stream/broker").strip()
+        if ws_raw.startswith("ws://"):
+            ws_raw = "wss://" + ws_raw[len("ws://") :]
+        self.ws_url = ws_raw
         self.username = os.getenv("NEO_USERNAME", "").strip()
         self.password = os.getenv("NEO_PASSWORD", "").strip()
         self.device_id = os.getenv("NEO_DEVICE_ID", "vn-alpha-radar").strip()
