@@ -2,8 +2,11 @@ name: Daily Market Data Sync (SSI FastConnect v3)
 
 on:
   schedule:
-    # Runs at 15:30 Vietnam Time (08:30 UTC), Monday to Friday
-    - cron: "30 8 * * 1-5"
+    # Runs automatically on GitHub Cloud (Mon-Fri) even when local PC is turned off:
+    # 11:40 VN (04:40 UTC - morning break), 15:15 VN (08:15 UTC - close), 15:45 VN (08:45 UTC - EOD settle)
+    - cron: "40 4 * * 1-5"
+    - cron: "15 8 * * 1-5"
+    - cron: "45 8 * * 1-5"
   workflow_dispatch: # Allows manual trigger anytime from GitHub Actions tab
 
 permissions:
@@ -31,6 +34,8 @@ jobs:
           SSI_FC_BASE_URL: https://api.ssi.com.vn/api/v3
           SSI_CONSUMER_ID: ${{ secrets.SSI_CONSUMER_ID }}
           SSI_CONSUMER_SECRET: ${{ secrets.SSI_CONSUMER_SECRET }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           APP_TIMEZONE: Asia/Ho_Chi_Minh
         run: |
           PYTHONPATH=backend python backend/scripts/collect_ssi_session.py
@@ -43,6 +48,7 @@ jobs:
           if git diff --staged --quiet; then
             echo "No new market data changes to commit."
           else
-            git commit -m "chore(data): auto-sync market snapshot $(date -u +'%Y-%m-%d')"
+            git commit -m "chore(data): cloud auto-sync SSI market snapshot $(date -u +'%Y-%m-%d %H:%M')"
+            git pull --rebase -X ours origin main
             git push
           fi

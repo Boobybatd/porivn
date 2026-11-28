@@ -328,7 +328,22 @@ def build_full_snapshot_bundle(
         no_change = int(neo_mkt.get("no_change") or 0)
         src_label = "NEO API" if "NEO" in str(neo_mkt.get("source", "")) else "SSI FastConnect v3"
         breadth_scope = f"Toàn chỉ số VNINDEX ({src_label})"
-        foreign_net = sum(float(s.get("foreign_net_val") or 0.0) for s in neo_stocks.values())
+
+        latest_date_str = str(closes.index[-1])
+        neo_is_fresh = any(
+            str(s.get("trading_session") or "").split("|")[0].strip() >= latest_date_str
+            for s in neo_stocks.values()
+        )
+        m_status = str(neo_mkt.get("market_status") or "")
+        if "SSI_EOD|" in m_status:
+            try:
+                foreign_net = float(m_status.split("|", 1)[1])
+            except Exception:
+                foreign_net = 0.0
+        elif neo_is_fresh:
+            foreign_net = sum(float(s.get("foreign_net_val") or 0.0) for s in neo_stocks.values())
+        else:
+            foreign_net = 0.0
     else:
         advances = int((latest_c[universe_syms] > prev_c[universe_syms]).sum())
         declines = int((latest_c[universe_syms] < prev_c[universe_syms]).sum())

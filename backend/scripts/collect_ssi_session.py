@@ -54,7 +54,7 @@ def collect_ssi_market_summary() -> None:
                     "no_change": summary.total_steady_stock,
                     "number_of_ce": summary.total_ceiling_stock,
                     "number_of_fl": summary.total_floor_stock,
-                    "market_status": "EOD_OR_LATEST",
+                    "market_status": f"SSI_EOD|{float(summary.net_purchases_foreign_value or 0.0)}",
                     "source": "SSI_FC_V3",
                 }
             )
@@ -74,6 +74,14 @@ def main() -> None:
     fetch_ssi_historical_ohlcv(lookback_days=30)
     out = export_snapshot_json()
     logger.info("Updated snapshot JSON at: %s", out)
+
+    # Also push to Supabase live snapshot table if service credentials are available
+    try:
+        from scripts.auto_sync_neo import push_snapshot_to_supabase
+
+        push_snapshot_to_supabase(out)
+    except Exception as exc:
+        logger.debug("Optional Supabase push skipped: %s", exc)
 
 
 if __name__ == "__main__":
