@@ -153,3 +153,34 @@ def test_signal_and_var_validation():
     rets = pd.Series(np.random.default_rng(7).normal(0, 0.01, 160))
     var_bt = backtest_historical_var(rets, window=100, confidence=0.95)
     assert var_bt.test_days == 60
+
+
+def test_neo_intraday_overlay():
+    from src.analytics.engine import apply_live_neo_intraday_overlay
+    from src.neo_api.client import _parse_neo_trading_date
+
+    assert _parse_neo_trading_date("27/11/2026") == "2026-11-27"
+    closes = pd.DataFrame({"VNINDEX": [1650.0], "HPG": [19800.0]}, index=["2026-11-27"])
+    volumes = pd.DataFrame({"VNINDEX": [500e6], "HPG": [10e6]}, index=["2026-11-27"])
+    values = pd.DataFrame({"VNINDEX": [10e12], "HPG": [200e9]}, index=["2026-11-27"])
+
+    neo_mkt = {
+        "source": "NEO_API_REST",
+        "captured_at": "2026-11-30T10:15:00+07:00",
+        "index_value": 1665.5,
+        "total_volume": 250e6,
+        "total_value": 5e12,
+    }
+    neo_stocks = {
+        "HPG": {
+            "trading_session": "2026-11-30|",
+            "last_price": 20300.0,
+            "total_volume": 6e6,
+            "total_value": 120e9,
+        }
+    }
+    c2, v2, _ = apply_live_neo_intraday_overlay(closes, volumes, values, neo_mkt, neo_stocks)
+    assert str(c2.index[-1]) == "2026-11-30"
+    assert float(c2.loc["2026-11-30", "VNINDEX"]) == 1665.5
+    assert float(c2.loc["2026-11-30", "HPG"]) == 20300.0
+    assert float(v2.loc["2026-11-30", "HPG"]) == 6e6

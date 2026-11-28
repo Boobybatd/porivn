@@ -59,6 +59,62 @@ def load_latest_neo_snapshots(db_path: Path | str | None = None) -> tuple[Option
     return mkt, stocks
 
 
+def apply_live_neo_intraday_overlay(
+    closes: pd.DataFrame,
+    volumes: pd.DataFrame,
+    values: pd.DataFrame,
+    neo_mkt: Optional[Dict[str, Any]],
+    neo_stocks: Dict[str, Dict[str, Any]],
+) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    """Overlay live intraday VPBankS NEO prices/volumes onto OHLCV pivots for true real-time scoring."""
+    if not neo_mkt or "NEO" not in str(neo_mkt.get("source", "")):
+        return closes, volumes, values
+
+    # Determine NEO trading session date (prefer explicit YYYY-MM-DD in trading_session tag)
+    neo_date = ""
+    for snap in neo_stocks.values():
+        ts_tag = str(snap.get("trading_session") or "")
+        head = ts_tag.split("|")[0].strip()
+        if len(head) == 10 and head[4] == "-" and head[7] == "-":
+            neo_date = head
+            break
+    if not neo_date:
+        cap = str(neo_mkt.get("captured_at") or "")[:10]
+        if len(cap) == 10 and cap[4] == "-":
+            neo_date = cap
+
+    latest_hist_date = str(closes.index[-1])
+    if not neo_date or neo_date < latest_hist_date:
+        return closes, volumes, values
+
+    c = closes.copy()
+    v = volumes.copy()
+    val = values.copy()
+
+    if neo_date > latest_hist_date:
+        c.loc[neo_date] = c.iloc[-1]
+        v.loc[neo_date] = 0.0
+        val.loc[neo_date] = 0.0
+
+    idx_val = neo_mkt.get("index_value")
+    if idx_val and float(idx_val) > 0 and "VNINDEX" in c.columns:
+        c.loc[neo_date, "VNINDEX"] = float(idx_val)
+        if neo_mkt.get("total_volume"):
+            v.loc[neo_date, "VNINDEX"] = float(neo_mkt["total_volume"])
+        if neo_mkt.get("total_value"):
+            val.loc[neo_date, "VNINDEX"] = float(neo_mkt["total_value"])
+
+    for sym, snap in neo_stocks.items():
+        if sym in c.columns and snap.get("last_price") and float(snap["last_price"]) > 0:
+            c.loc[neo_date, sym] = float(snap["last_price"])
+            if snap.get("total_volume") is not None:
+                v.loc[neo_date, sym] = float(snap["total_volume"])
+            if snap.get("total_value") is not None:
+                val.loc[neo_date, sym] = float(snap["total_value"])
+
+    return c.sort_index(), v.sort_index(), val.sort_index()
+
+
 def build_orderbook_snapshot_for_symbol(
     sym: str,
     last_close: float,
@@ -258,6 +314,7 @@ def build_full_snapshot_bundle(
     _, sector_map = load_universe()
     closes, volumes, values = load_ohlcv_pivots(db_path)
     neo_mkt, neo_stocks = load_latest_neo_snapshots(db_path)
+    closes, volumes, values = apply_live_neo_intraday_overlay(closes, volumes, values, neo_mkt, neo_stocks)
 
     latest_c = closes.iloc[-1]
     prev_c = closes.iloc[-2]

@@ -158,6 +158,16 @@ def run_neo_sync_cycle(neo_client: NeoAPIClient, symbols: list[str], sync_ssi_eo
     saved = insert_stock_snapshots(snaps)
     logger.info("NEO REST saved %d stock orderbooks & foreign flow snapshots.", saved)
 
+    # Keep SQLite compact during 15s real-time loops (prune intraday rows older than 24h)
+    try:
+        cutoff = (datetime.now(VN_TZ) - timedelta(hours=24)).isoformat(timespec="seconds")
+        with get_connection() as conn:
+            conn.execute("DELETE FROM intraday_market_snapshots WHERE captured_at < ?", (cutoff,))
+            conn.execute("DELETE FROM intraday_stock_snapshots WHERE captured_at < ?", (cutoff,))
+            conn.commit()
+    except Exception:
+        pass
+
     if sync_ssi_eod:
         try:
             logger.info("Refreshing recent SSI FastConnect v3 EOD OHLCV bars...")

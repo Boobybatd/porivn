@@ -1190,7 +1190,7 @@ export default function HomePage() {
 
   useEffect(() => {
     if (!autoRefresh) return;
-    const id = setInterval(fetchLatestBundle, 30_000);
+    const id = setInterval(fetchLatestBundle, 15_000);
     return () => clearInterval(id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [autoRefresh]);
@@ -1695,6 +1695,35 @@ export default function HomePage() {
               >
                 PORI — CÔNG CỤ ĐỊNH LƯỢNG & QUẢN TRỊ RỦI RO DANH MỤC • {bundle.sessions_count} PHIÊN DỮ LIỆU
               </span>
+              {bundle.generated_at && (
+                <span
+                  style={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: 5,
+                    fontFamily: MONO,
+                    fontSize: 9,
+                    fontWeight: 700,
+                    padding: "2px 8px",
+                    borderRadius: 99,
+                    background: "var(--surf2)",
+                    border: "1px solid var(--bd-mid)",
+                    color: "var(--ink)",
+                  }}
+                  title="Thời điểm dữ liệu NEO + SSI được đồng bộ gần nhất (tự làm mới mỗi 15 giây khi AUTO: BẬT)"
+                >
+                  <span
+                    style={{
+                      width: 6,
+                      height: 6,
+                      borderRadius: "50%",
+                      background: autoRefresh ? "var(--pos)" : "var(--mut)",
+                      display: "inline-block",
+                    }}
+                  />
+                  ĐỒNG BỘ: {new Date(bundle.generated_at).toLocaleTimeString("vi-VN", { hour: "2-digit", minute: "2-digit", second: "2-digit" })}
+                </span>
+              )}
               {activeTab !== "guide" && (
                 <button
                   onClick={() => setActiveTab("guide")}

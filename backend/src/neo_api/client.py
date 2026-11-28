@@ -137,6 +137,17 @@ class NeoAPIClient:
         return out
 
 
+def _parse_neo_trading_date(raw_date: Any) -> str:
+    """Convert NEO 'DD/MM/YYYY' tradingDate to 'YYYY-MM-DD'."""
+    s = str(raw_date or "").strip()
+    if len(s) == 10 and s[2] == "/" and s[5] == "/":
+        dd, mm, yyyy = s.split("/")
+        return f"{yyyy}-{mm}-{dd}"
+    if len(s) == 10 and s[4] == "-" and s[7] == "-":
+        return s
+    return ""
+
+
 def normalize_neo_stock_item(
     item: Dict[str, Any],
     captured_at: Optional[str] = None,
@@ -148,6 +159,10 @@ def normalize_neo_stock_item(
     fnet = item.get("foreignNetValue")
     if fnet is None:
         fnet = fb_val - fs_val
+
+    td_iso = _parse_neo_trading_date(item.get("tradingDate"))
+    raw_sess = str(item.get("tradingSession") or "").strip()
+    session_tag = f"{td_iso}|{raw_sess}" if td_iso else raw_sess
 
     return {
         "captured_at": captured_at or now_vn_iso(),
@@ -176,7 +191,7 @@ def normalize_neo_stock_item(
         "foreign_net_val": float(fnet),
         "foreign_remain": item.get("foreignRemain"),
         "foreign_room": item.get("foreignRoom"),
-        "trading_session": item.get("tradingSession"),
+        "trading_session": session_tag,
         "source": source,
     }
 
