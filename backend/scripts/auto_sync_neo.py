@@ -17,7 +17,7 @@ import os
 import subprocess
 import sys
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -28,7 +28,7 @@ ROOT_DIR = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT_DIR / "backend"))
 
 from src.analytics.engine import export_snapshot_json
-from src.data.db import init_db, insert_market_snapshot, insert_stock_snapshots
+from src.data.db import get_connection, init_db, insert_market_snapshot, insert_stock_snapshots
 from src.data.ssi_client import fetch_ssi_historical_ohlcv, load_universe
 from src.neo_api.client import NeoAPIClient
 
@@ -38,6 +38,26 @@ logging.basicConfig(
 )
 logger = logging.getLogger("pori_auto_sync")
 VN_TZ = ZoneInfo("Asia/Ho_Chi_Minh")
+
+
+def latest_completed_trading_day(now_vn: datetime) -> str:
+    """Return YYYY-MM-DD of the most recent completed HOSE session (Mon-Fri after 15:05)."""
+    d = now_vn.date()
+    hhmm = now_vn.hour * 100 + now_vn.minute
+    if d.weekday() < 5 and hhmm < 1505:
+        d = d - timedelta(days=1)
+    while d.weekday() >= 5:
+        d = d - timedelta(days=1)
+    return d.strftime("%Y-%m-%d")
+
+
+def get_sqlite_max_ohlcv_date() -> str:
+    try:
+        with get_connection() as conn:
+            row = conn.execute("SELECT MAX(trading_date) FROM daily_ohlcv").fetchone()
+            return str(row[0] or "") if row else ""
+    except Exception:
+        return ""
 
 
 def is_vn_trading_window(now_vn: datetime) -> bool:
@@ -178,12 +198,22 @@ def main() -> None:
     while True:
         now_vn = datetime.now(VN_TZ)
         today_str = now_vn.strftime("%Y-%m-%d")
+        expected_eod = latest_completed_trading_day(now_vn)
+        max_db_date = get_sqlite_max_ohlcv_date()
+        needs_ssi_catchup = (not max_db_date) or (max_db_date < expected_eod)
         in_hours = is_vn_trading_window(now_vn)
         is_eod_time = now_vn.weekday() < 5 and (1502 <= (now_vn.hour * 100 + now_vn.minute) <= 1525) and last_eod_ssi_date != today_str
 
-        if args.once or args.force or in_hours or is_eod_time:
+        if args.once or args.force or in_hours or is_eod_time or needs_ssi_catchup:
             try:
-                out_path = run_neo_sync_cycle(neo_client, symbols, sync_ssi_eod=is_eod_time)
+                do_ssi = is_eod_time or needs_ssi_catchup
+                if needs_ssi_catchup:
+                    logger.info(
+                        "SQLite latest OHLCV (%s) is behind expected trading day (%s). Catching up SSI bars...",
+                        max_db_date or "empty",
+                        expected_eod,
+                    )
+                out_path = run_neo_sync_cycle(neo_client, symbols, sync_ssi_eod=do_ssi)
                 if is_eod_time:
                     last_eod_ssi_date = today_str
 
@@ -195,6 +225,7 @@ def main() -> None:
                     and (
                         args.once
                         or is_eod_time
+                        or needs_ssi_catchup
                         or (not sb_ok and (now_mono - last_git_push_ts) >= args.git_interval)
                         or (sb_ok and (now_mono - last_git_push_ts) >= max(3600, args.git_interval))
                     )
