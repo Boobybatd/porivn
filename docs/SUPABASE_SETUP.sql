@@ -13,15 +13,21 @@ create table if not exists public.pori_user_workspaces (
 
 alter table public.pori_user_workspaces enable row level security;
 
--- Mỗi người dùng chỉ xem, thêm, sửa dữ liệu của chính tài khoản Email của mình
+drop policy if exists "Users can view own workspace" on public.pori_user_workspaces;
 create policy "Users can view own workspace"
   on public.pori_user_workspaces for select
   using (auth.uid() = user_id);
 
+drop policy if exists "Users can insert own workspace" on public.pori_user_workspaces;
 create policy "Users can insert own workspace"
   on public.pori_user_workspaces for insert
   with check (auth.uid() = user_id);
 
+drop policy if exists "Users can update own workspace" on public.pori_user_workspaces;
 create policy "Users can update own workspace"
   on public.pori_user_workspaces for update
   using (auth.uid() = user_id);
+
+grant usage on schema public to anon, authenticated, service_role;
+grant select, insert, update on public.pori_user_workspaces to authenticated;
+grant all on public.pori_user_workspaces to service_role;

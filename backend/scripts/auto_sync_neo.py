@@ -148,26 +148,29 @@ def git_commit_and_push(reason: str) -> bool:
 
 def run_neo_sync_cycle(neo_client: NeoAPIClient, symbols: list[str], sync_ssi_eod: bool = False) -> Path:
     init_db()
-    neo_client.authenticate()
-
-    for idx_code in ("VNINDEX", "VN30"):
-        mkt = neo_client.get_intraday_index(idx_code)
-        insert_market_snapshot(mkt)
-        logger.info("NEO %s: value=%s, adv=%s, dec=%s", idx_code, mkt.get("index_value"), mkt.get("advances"), mkt.get("declines"))
-
-    snaps = neo_client.get_stock_details_batch(symbols, chunk_size=30)
-    saved = insert_stock_snapshots(snaps)
-    logger.info("NEO REST saved %d stock orderbooks & foreign flow snapshots.", saved)
-
-    # Keep SQLite compact during 15s real-time loops (prune intraday rows older than 24h)
     try:
-        cutoff = (datetime.now(VN_TZ) - timedelta(hours=24)).isoformat(timespec="seconds")
-        with get_connection() as conn:
-            conn.execute("DELETE FROM intraday_market_snapshots WHERE captured_at < ?", (cutoff,))
-            conn.execute("DELETE FROM intraday_stock_snapshots WHERE captured_at < ?", (cutoff,))
-            conn.commit()
-    except Exception:
-        pass
+        neo_client.authenticate()
+
+        for idx_code in ("VNINDEX", "VN30"):
+            mkt = neo_client.get_intraday_index(idx_code)
+            insert_market_snapshot(mkt)
+            logger.info("NEO %s: value=%s, adv=%s, dec=%s", idx_code, mkt.get("index_value"), mkt.get("advances"), mkt.get("declines"))
+
+        snaps = neo_client.get_stock_details_batch(symbols, chunk_size=30)
+        saved = insert_stock_snapshots(snaps)
+        logger.info("NEO REST saved %d stock orderbooks & foreign flow snapshots.", saved)
+
+        # Keep SQLite compact during 15s real-time loops (prune intraday rows older than 24h)
+        try:
+            cutoff = (datetime.now(VN_TZ) - timedelta(hours=24)).isoformat(timespec="seconds")
+            with get_connection() as conn:
+                conn.execute("DELETE FROM intraday_market_snapshots WHERE captured_at < ?", (cutoff,))
+                conn.execute("DELETE FROM intraday_stock_snapshots WHERE captured_at < ?", (cutoff,))
+                conn.commit()
+        except Exception:
+            pass
+    except Exception as exc:
+        logger.warning("NEO REST unavailable on current IP/session (%s); falling back to SSI + cached snapshots.", exc)
 
     if sync_ssi_eod:
         try:
