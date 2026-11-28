@@ -79,10 +79,11 @@ def push_snapshot_to_supabase(snapshot_path: Path) -> bool:
         endpoint = f"{url}/rest/v1/pori_live_snapshots"
         headers = {
             "apikey": service_key,
-            "Authorization": f"Bearer {service_key}",
             "Content-Type": "application/json",
             "Prefer": "resolution=merge-duplicates",
         }
+        if service_key.startswith("eyJ"):
+            headers["Authorization"] = f"Bearer {service_key}"
         body = {
             "id": "latest",
             "generated_at": payload.get("generated_at"),
