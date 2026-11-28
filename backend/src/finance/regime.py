@@ -63,12 +63,13 @@ def classify_market_regime(
         breadth_vote, breadth_status = 0, f"Trung tính (A/D={ad_ratio:.2f}, {pct_above_ma20:.0%} > MA20)"
 
     # Pillar 3: Liquidity & Foreign Flow
-    if volume_pace >= 1.05 and foreign_net_value >= 0:
+    fnv = float(foreign_net_value) if foreign_net_value is not None else 0.0
+    if volume_pace >= 1.05 and fnv >= 0:
         liq_vote, liquidity_status = 1, f"Xác nhận dòng tiền (VolPace={volume_pace:.2f}x, Ngoại mua ròng)"
-    elif volume_pace < 0.80 and foreign_net_value < 0:
+    elif volume_pace < 0.80 and fnv < 0:
         liq_vote, liquidity_status = -1, f"Thanh khoản yếu & Ngoại bán ròng (VolPace={volume_pace:.2f}x)"
-    elif foreign_net_value < -300e9:
-        liq_vote, liquidity_status = -1, f"Áp lực bán ròng khối ngoại lớn ({foreign_net_value/1e9:,.0f} tỷ)"
+    elif fnv < -300e9:
+        liq_vote, liquidity_status = -1, f"Áp lực bán ròng khối ngoại lớn ({fnv/1e9:,.0f} tỷ)"
     else:
         liq_vote, liquidity_status = 0, f"Dòng tiền trung tính (VolPace={volume_pace:.2f}x)"
 

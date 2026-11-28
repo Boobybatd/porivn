@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 
 
 def load_universe(config_path: Path | None = None) -> tuple[list[str], dict[str, str]]:
-    """Return (all_symbols_with_indices, symbol_to_sector_map)."""
+    """Return (all_symbols_with_indices_and_extended, core_55_symbol_to_sector_map)."""
     path = config_path or (ROOT_DIR / "backend" / "config" / "universe.json")
     with open(path, "r", encoding="utf-8") as f:
         cfg = json.load(f)
@@ -21,8 +21,25 @@ def load_universe(config_path: Path | None = None) -> tuple[list[str], dict[str,
     for sector, syms in cfg["sectors"].items():
         for s in syms:
             sector_map[s] = sector
-    all_symbols = list(cfg.get("indices", [])) + list(sector_map.keys())
+    ext_syms: list[str] = []
+    for _, syms in cfg.get("extended_assets", {}).items():
+        for s in syms:
+            if s not in sector_map:
+                ext_syms.append(s)
+    all_symbols = list(cfg.get("indices", [])) + list(sector_map.keys()) + ext_syms
     return all_symbols, sector_map
+
+
+def load_extended_sector_map(config_path: Path | None = None) -> dict[str, str]:
+    """Return {symbol: category} for ETFs, HNX, and UPCoM extended assets."""
+    path = config_path or (ROOT_DIR / "backend" / "config" / "universe.json")
+    with open(path, "r", encoding="utf-8") as f:
+        cfg = json.load(f)
+    out: dict[str, str] = {}
+    for sec, syms in cfg.get("extended_assets", {}).items():
+        for s in syms:
+            out[s] = sec
+    return out
 
 
 def fetch_ssi_historical_ohlcv(

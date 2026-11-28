@@ -141,3 +141,108 @@ def backtest_historical_var(
         expected_rate=round(exp_rate, 4),
         status=status,
     )
+
+
+def evaluate_portfolio_rebalance_backtest(
+    prices_df: pd.DataFrame,
+    rebalance_picks: Dict[str, List[str]],  # signal_date -> top_k symbols
+    regime_by_date: Dict[str, str],
+    rebalance_every_n: int = 20,
+    fee_roundtrip_pct: float = 0.003,
+) -> Dict[str, object]:
+    """
+    Out-of-sample Strategy Rebalance Backtest (Weekly/Monthly Top-5 with Regime Cash Buffer)
+    vs VNINDEX Buy & Hold (rebalanced next session T+1 to prevent look-ahead bias).
+    """
+    if prices_df.empty or "VNINDEX" not in prices_df.columns or not rebalance_picks:
+        return {
+            "rebalance_days": rebalance_every_n,
+            "total_return_pct": 0.0,
+            "vnindex_return_pct": 0.0,
+            "sharpe_ratio": 0.0,
+            "max_drawdown_pct": 0.0,
+            "vnindex_mdd_pct": 0.0,
+            "equity_curve": [],
+        }
+
+    dates = list(prices_df.index)
+    sorted_pick_dates = sorted(d for d in rebalance_picks.keys() if d in prices_df.index)
+    if len(sorted_pick_dates) < 2:
+        return {
+            "rebalance_days": rebalance_every_n,
+            "total_return_pct": 0.0,
+            "vnindex_return_pct": 0.0,
+            "sharpe_ratio": 0.0,
+            "max_drawdown_pct": 0.0,
+            "vnindex_mdd_pct": 0.0,
+            "equity_curve": [],
+        }
+
+    start_idx = dates.index(sorted_pick_dates[0]) + 1
+    if start_idx >= len(dates) - 2:
+        start_idx = max(1, len(dates) - 20)
+
+    port_val = 100.0
+    mkt_val = 100.0
+    port_rets: List[float] = []
+    curve: List[Dict[str, object]] = [{"date": str(dates[start_idx - 1]), "strategy": 100.0, "vnindex": 100.0}]
+
+    current_weights: Dict[str, float] = {}
+    pick_set = set(sorted_pick_dates)
+
+    for idx in range(start_idx, len(dates)):
+        prev_date = str(dates[idx - 1])
+        curr_date = str(dates[idx])
+
+        # Rebalance on session T+1 after signal at prev_date (T)
+        if prev_date in pick_set:
+            picks = [s for s in rebalance_picks.get(prev_date, []) if s in prices_df.columns]
+            reg = regime_by_date.get(prev_date, "Neutral")
+            # Regime Cash Buffer: invest 100% in Positive, 70% Neutral, 40% Defensive, 20% High Risk
+            invest_ratio = 1.0 if reg == "Positive" else 0.70 if reg == "Neutral" else 0.40 if reg == "Defensive" else 0.20
+            new_weights = {s: invest_ratio / len(picks) for s in picks} if picks else {}
+            turnover = sum(abs(new_weights.get(s, 0.0) - current_weights.get(s, 0.0)) for s in set(new_weights) | set(current_weights))
+            port_val *= max(0.0, 1.0 - turnover * (fee_roundtrip_pct / 2.0))
+            current_weights = new_weights
+
+        day_ret = 0.0
+        for s, w in current_weights.items():
+            p0 = prices_df.iloc[idx - 1][s]
+            p1 = prices_df.iloc[idx][s]
+            if pd.notna(p0) and pd.notna(p1) and float(p0) > 0:
+                day_ret += w * (float(p1) / float(p0) - 1.0)
+
+        m0 = prices_df.iloc[idx - 1]["VNINDEX"]
+        m1 = prices_df.iloc[idx]["VNINDEX"]
+        mkt_ret = (float(m1) / float(m0) - 1.0) if (pd.notna(m0) and pd.notna(m1) and float(m0) > 0) else 0.0
+
+        port_val *= 1.0 + day_ret
+        mkt_val *= 1.0 + mkt_ret
+        port_rets.append(day_ret)
+        curve.append({"date": curr_date, "strategy": round(port_val, 2), "vnindex": round(mkt_val, 2)})
+
+    arr = np.array(port_rets, dtype=float)
+    rf_daily = 0.04 / 252.0
+    std = float(np.std(arr, ddof=1)) if len(arr) > 1 else 0.0
+    sharpe = float(((np.mean(arr) - rf_daily) / std) * np.sqrt(252.0)) if std > 0 else 0.0
+
+    strat_vals = np.array([pt["strategy"] for pt in curve], dtype=float)
+    mkt_vals = np.array([pt["vnindex"] for pt in curve], dtype=float)
+    strat_mdd = float(np.min(strat_vals / np.maximum.accumulate(strat_vals) - 1.0)) * 100.0
+    mkt_mdd = float(np.min(mkt_vals / np.maximum.accumulate(mkt_vals) - 1.0)) * 100.0
+
+    # Downsample curve to <= 90 points for compact JSON
+    step = max(1, len(curve) // 90)
+    compact_curve = curve[::step]
+    if compact_curve[-1]["date"] != curve[-1]["date"]:
+        compact_curve.append(curve[-1])
+
+    return {
+        "rebalance_days": rebalance_every_n,
+        "total_return_pct": round(port_val - 100.0, 2),
+        "vnindex_return_pct": round(mkt_val - 100.0, 2),
+        "sharpe_ratio": round(sharpe, 2),
+        "max_drawdown_pct": round(strat_mdd, 2),
+        "vnindex_mdd_pct": round(mkt_mdd, 2),
+        "equity_curve": compact_curve,
+    }

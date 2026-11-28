@@ -8,7 +8,7 @@ import requests
 import websockets
 from dotenv import load_dotenv
 
-from src.data.db import ROOT_DIR, insert_market_snapshot, insert_stock_snapshots, now_vn_iso
+from src.data.db import ROOT_DIR, insert_market_snapshot, insert_stock_snapshots, now_vn_iso, upsert_stock_events
 from src.finance.orderbook import parse_neo_price
 
 logger = logging.getLogger(__name__)
@@ -117,8 +117,9 @@ class NeoAPIClient:
         }
 
     def get_stock_details_batch(self, symbols: List[str], chunk_size: int = 30) -> List[Dict[str, Any]]:
-        """Fetch stock details (price, 3-level Bid/Ask, foreign flow) in comma-separated chunks."""
+        """Fetch stock details (price, 3-level Bid/Ask, foreign flow, events) in comma-separated chunks."""
         out: List[Dict[str, Any]] = []
+        event_rows: List[Dict[str, Any]] = []
         for i in range(0, len(symbols), chunk_size):
             chunk = symbols[i : i + chunk_size]
             self._limiter.wait()
@@ -134,6 +135,30 @@ class NeoAPIClient:
             ts = now_vn_iso()
             for item in items:
                 out.append(normalize_neo_stock_item(item, captured_at=ts, source="NEO_API_REST"))
+                raw_events = item.get("events") or []
+                clean_events = [
+                    {
+                        "title": ev.get("evenTitle") or ev.get("eventName") or "",
+                        "code": ev.get("eventListCode") or "",
+                        "type": ev.get("eventName") or "",
+                        "public_date": str(ev.get("publicDate") or "")[:10],
+                        "exright_date": str(ev.get("exrightDate") or "")[:10],
+                    }
+                    for ev in raw_events[:6]
+                    if ev.get("evenTitle") or ev.get("eventName")
+                ]
+                event_rows.append(
+                    {
+                        "symbol": str(item.get("symbol", "")).upper(),
+                        "events": clean_events,
+                        "listed_shares": item.get("listedShare"),
+                    }
+                )
+        if event_rows:
+            try:
+                upsert_stock_events(event_rows)
+            except Exception as exc:
+                logger.warning("Failed to persist stock events: %s", exc)
         return out
 
 

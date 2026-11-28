@@ -106,6 +106,13 @@ def init_db(db_path: Path | str | None = None) -> Path:
                 PRIMARY KEY (signal_date, symbol)
             );
 
+            CREATE TABLE IF NOT EXISTS stock_events (
+                symbol TEXT PRIMARY KEY,
+                events_json TEXT NOT NULL,
+                listed_shares REAL,
+                updated_at TEXT NOT NULL
+            );
+
             CREATE INDEX IF NOT EXISTS idx_ohlcv_symbol_date
                 ON daily_ohlcv(symbol, trading_date);
             CREATE INDEX IF NOT EXISTS idx_stock_snap_sym_time
@@ -245,6 +252,54 @@ def insert_stock_snapshots(snaps: Iterable[dict[str, Any]], db_path: Path | str 
     return len(rows)
 
 
+def upsert_stock_events(items: Iterable[dict[str, Any]], db_path: Path | str | None = None) -> int:
+    now_str = now_vn_iso()
+    rows = []
+    for it in items:
+        sym = str(it.get("symbol") or "").upper().strip()
+        if not sym:
+            continue
+        ev_list = it.get("events") or []
+        listed = it.get("listed_shares")
+        rows.append((sym, json.dumps(ev_list, ensure_ascii=False), float(listed) if listed else None, now_str))
+    if not rows:
+        return 0
+    with get_connection(db_path) as conn:
+        conn.executemany(
+            """
+            INSERT INTO stock_events (symbol, events_json, listed_shares, updated_at)
+            VALUES (?, ?, ?, ?)
+            ON CONFLICT(symbol) DO UPDATE SET
+                events_json=excluded.events_json,
+                listed_shares=COALESCE(excluded.listed_shares, stock_events.listed_shares),
+                updated_at=excluded.updated_at
+            """,
+            rows,
+        )
+        conn.commit()
+    return len(rows)
+
+
+def load_all_stock_events(db_path: Path | str | None = None) -> dict[str, dict[str, Any]]:
+    try:
+        with get_connection(db_path) as conn:
+            rows = conn.execute("SELECT symbol, events_json, listed_shares, updated_at FROM stock_events").fetchall()
+        out: dict[str, dict[str, Any]] = {}
+        for r in rows:
+            try:
+                ev = json.loads(r["events_json"] or "[]")
+            except Exception:
+                ev = []
+            out[r["symbol"]] = {
+                "events": ev,
+                "listed_shares": r["listed_shares"],
+                "updated_at": r["updated_at"],
+            }
+        return out
+    except Exception:
+        return {}
+
+
 def save_signals(signals: Iterable[dict[str, Any]], db_path: Path | str | None = None) -> int:
     now_str = now_vn_iso()
     rows = [
@@ -287,3 +342,51 @@ def save_signals(signals: Iterable[dict[str, Any]], db_path: Path | str | None =
         )
         conn.commit()
     return len(rows)
+
+
+def upsert_stock_events(items: Iterable[dict[str, Any]], db_path: Path | str | None = None) -> int:
+    now_str = now_vn_iso()
+    rows = []
+    for it in items:
+        sym = str(it.get("symbol") or "").upper().strip()
+        if not sym:
+            continue
+        ev_list = it.get("events") or []
+        listed = it.get("listed_shares")
+        rows.append((sym, json.dumps(ev_list, ensure_ascii=False), float(listed) if listed else None, now_str))
+    if not rows:
+        return 0
+    with get_connection(db_path) as conn:
+        conn.executemany(
+            """
+            INSERT INTO stock_events (symbol, events_json, listed_shares, updated_at)
+            VALUES (?, ?, ?, ?)
+            ON CONFLICT(symbol) DO UPDATE SET
+                events_json=excluded.events_json,
+                listed_shares=COALESCE(excluded.listed_shares, stock_events.listed_shares),
+                updated_at=excluded.updated_at
+            """,
+            rows,
+        )
+        conn.commit()
+    return len(rows)
+
+
+def load_all_stock_events(db_path: Path | str | None = None) -> dict[str, dict[str, Any]]:
+    try:
+        with get_connection(db_path) as conn:
+            rows = conn.execute("SELECT symbol, events_json, listed_shares, updated_at FROM stock_events").fetchall()
+        out: dict[str, dict[str, Any]] = {}
+        for r in rows:
+            try:
+                ev = json.loads(r["events_json"] or "[]")
+            except Exception:
+                ev = []
+            out[r["symbol"]] = {
+                "events": ev,
+                "listed_shares": r["listed_shares"],
+                "updated_at": r["updated_at"],
+            }
+        return out
+    except Exception:
+        return {}

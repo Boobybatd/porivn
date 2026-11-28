@@ -1,9 +1,19 @@
 import type {
+  CustomFundamentalInput,
   DiscoveryStock,
+  EquityCurvePoint,
   OrderBookSnapshot,
   PortfolioHealth,
+  StockSeriesItem,
   WhatIfResult,
 } from "@/types/radar";
+
+export interface AssetPriceLike {
+  symbol: string;
+  sector: string;
+  close_price: number;
+  adv_20_val: number;
+}
 
 const SECTOR_VN_MAP: Record<string, string> = {
   Banking: "Ngân hàng",
@@ -14,6 +24,9 @@ const SECTOR_VN_MAP: Record<string, string> = {
   Technology_Telecom: "Công nghệ & Viễn thông",
   Oil_Gas_Energy: "Dầu khí & Năng lượng",
   Industrial_Logistics: "Công nghiệp & Cảng biển",
+  "Quỹ ETF": "Quỹ ETF",
+  "Sàn HNX": "Sàn HNX",
+  "Sàn UPCoM": "Sàn UPCoM",
   Other: "Khác",
 };
 
@@ -60,7 +73,9 @@ export function computeClientPortfolioHealth(
   positions: Record<string, number>,
   cashVnd: number,
   returnsMap: Record<string, number[]>,
-  discoveryMap: Record<string, DiscoveryStock>
+  discoveryMap: Record<string, AssetPriceLike>,
+  costBasisMap?: Record<string, number>,
+  dates130d?: string[]
 ): PortfolioHealth | null {
   const syms = Object.keys(positions)
     .map((s) => s.toUpperCase())
@@ -169,7 +184,7 @@ export function computeClientPortfolioHealth(
   const tailMean = tail.reduce((a, b) => a + b, 0) / Math.max(1, tail.length);
   const histEs95Pct = Math.max(histVar95Pct, -tailMean);
 
-  // Mean & Std Dev
+  // Mean, Volatility, Performance Ratios (Sharpe, Sortino, Max Drawdown) & Equity Curve
   const meanRet = portRet.reduce((a, b) => a + b, 0) / nSessions;
   const variance =
     portRet.reduce((acc, r) => acc + (r - meanRet) * (r - meanRet), 0) /
@@ -177,6 +192,54 @@ export function computeClientPortfolioHealth(
   const sigmaDaily = Math.sqrt(variance);
   const paramVar95Pct = Math.max(0, 1.64485 * sigmaDaily - meanRet);
   const annVolPct = sigmaDaily * Math.sqrt(252);
+  const rfDaily = 0.04 / 252;
+  const annRetPct = meanRet * 252;
+  const sharpeRatio = sigmaDaily > 0 ? ((meanRet - rfDaily) / sigmaDaily) * Math.sqrt(252) : 0;
+
+  const downsideSqSum = portRet.reduce((acc, r) => {
+    const d = Math.min(0, r - rfDaily);
+    return acc + d * d;
+  }, 0);
+  const downsideDev = Math.sqrt(downsideSqSum / Math.max(1, nSessions - 1));
+  const sortinoRatio = downsideDev > 0 ? ((meanRet - rfDaily) / downsideDev) * Math.sqrt(252) : 0;
+  const winDaysPct = (portRet.filter((r) => r > 0).length / Math.max(1, nSessions)) * 100;
+
+  let portCurveVal = 100;
+  let mktCurveVal = 100;
+  let peakVal = 100;
+  let maxDrawdownPct = 0;
+  const mktSeries = returnsMap["VNINDEX"] || [];
+  const rawCurve: EquityCurvePoint[] = [];
+  for (let t = 0; t < nSessions; t++) {
+    portCurveVal *= Math.exp(portRet[t]);
+    mktCurveVal *= Math.exp(mktSeries[t] ?? 0);
+    if (portCurveVal > peakVal) peakVal = portCurveVal;
+    const dd = (portCurveVal / peakVal - 1) * 100;
+    if (dd < maxDrawdownPct) maxDrawdownPct = dd;
+    rawCurve.push({
+      date: dates130d?.[t] || `#${t + 1}`,
+      portfolio: Number(portCurveVal.toFixed(2)),
+      vnindex: Number(mktCurveVal.toFixed(2)),
+    });
+  }
+  const curveStep = Math.max(1, Math.floor(rawCurve.length / 65));
+  const equityCurve = rawCurve.filter((_, i) => i % curveStep === 0 || i === rawCurve.length - 1);
+
+  // Realized Cost Basis & Unrealized PnL (if user entered cost basis values)
+  let costBasisTotal = 0;
+  let equityWithCost = 0;
+  if (costBasisMap) {
+    syms.forEach((s) => {
+      const cb = Number(costBasisMap[s] || 0);
+      if (cb > 0) {
+        costBasisTotal += cb;
+        equityWithCost += positions[s];
+      }
+    });
+  }
+  const unrealizedPnlVnd = costBasisTotal > 0 ? Math.round(equityWithCost - costBasisTotal) : undefined;
+  const unrealizedPnlPct =
+    costBasisTotal > 0 ? Number((((equityWithCost - costBasisTotal) / costBasisTotal) * 100).toFixed(2)) : undefined;
 
   // Marginal / Component Risk Contribution (% of portfolio variance contributed by each stock)
   const componentRiskPct: Record<string, number> = {};
@@ -293,6 +356,15 @@ export function computeClientPortfolioHealth(
     hist_es_95_vnd: Math.round(histEs95Pct * totalNav),
     param_var_95_pct: Number(paramVar95Pct.toFixed(5)),
     annualized_vol_pct: Number(annVolPct.toFixed(4)),
+    annualized_return_pct: Number((annRetPct * 100).toFixed(2)),
+    sharpe_ratio: Number(sharpeRatio.toFixed(2)),
+    sortino_ratio: Number(sortinoRatio.toFixed(2)),
+    max_drawdown_pct: Number(maxDrawdownPct.toFixed(2)),
+    win_days_pct: Number(winDaysPct.toFixed(1)),
+    cost_basis_total_vnd: costBasisTotal > 0 ? Math.round(costBasisTotal) : undefined,
+    unrealized_pnl_vnd: unrealizedPnlVnd,
+    unrealized_pnl_pct: unrealizedPnlPct,
+    equity_curve: equityCurve,
     health_score: Number(healthScore.toFixed(1)),
     sector_weights: sectorWeights,
     correlation_matrix: corrMatrix,
@@ -310,7 +382,7 @@ export function computeClientWhatIf(
   candidateSymbol: string,
   addAmountVnd: number,
   returnsMap: Record<string, number[]>,
-  discoveryMap: Record<string, DiscoveryStock>
+  discoveryMap: Record<string, AssetPriceLike>
 ): WhatIfResult | null {
   const sym = candidateSymbol.toUpperCase();
   if (!returnsMap[sym] || addAmountVnd <= 0) return null;
@@ -722,5 +794,424 @@ export function computeCapitalAllocationAdvice(
     rationale,
     suggestedCandidates,
     actionChecklist,
+  };
+}
+
+export type RebalanceObjective = "MIN_VAR" | "RISK_PARITY" | "TARGET_VAR";
+
+export interface RebalanceTradeItem {
+  symbol: string;
+  sector: string;
+  action: "MUA" | "BÁN" | "GIỮ";
+  lots_100: number;
+  delta_shares: number;
+  delta_vnd: number;
+  current_vnd: number;
+  target_vnd: number;
+  current_weight_pct: number;
+  target_weight_pct: number;
+}
+
+export interface RebalanceSuggestionResult {
+  objective: RebalanceObjective;
+  trades: RebalanceTradeItem[];
+  var_before_pct: number;
+  var_after_pct: number;
+  hhi_before: number;
+  hhi_after: number;
+  recommended_cash_vnd: number;
+  projected_positions: Record<string, number>;
+  projected_cash_vnd: number;
+  summary: string;
+}
+
+function projectSimplexWithCap(weights: number[], maxCap: number): number[] {
+  const w = weights.map((x) => Math.max(0.02, Math.min(maxCap, x)));
+  for (let iter = 0; iter < 15; iter++) {
+    const sum = w.reduce((a, b) => a + b, 0);
+    if (sum <= 0) break;
+    for (let i = 0; i < w.length; i++) w[i] = Math.min(maxCap, w[i] / sum);
+  }
+  const finalSum = w.reduce((a, b) => a + b, 0);
+  return finalSum > 0 ? w.map((x) => x / finalSum) : weights;
+}
+
+export function computeRebalanceSuggestions(
+  positions: Record<string, number>,
+  cashVnd: number,
+  returnsMap: Record<string, number[]>,
+  assetMap: Record<string, AssetPriceLike>,
+  objective: RebalanceObjective,
+  targetVarPct = 2.0,
+  sectorCap = 0.4
+): RebalanceSuggestionResult | null {
+  const syms = Object.keys(positions)
+    .map((s) => s.toUpperCase())
+    .filter((s) => positions[s] > 0 && returnsMap[s] && returnsMap[s].length > 20);
+  if (syms.length < 2) return null;
+
+  const before = computeClientPortfolioHealth(positions, cashVnd, returnsMap, assetMap);
+  if (!before) return null;
+
+  const equityTotal = syms.reduce((acc, s) => acc + positions[s], 0);
+  const totalNav = equityTotal + Math.max(0, cashVnd);
+  const n = syms.length;
+  const nSessions = returnsMap[syms[0]].length;
+
+  // Individual daily std dev and covariance matrix
+  const means = syms.map((s) => returnsMap[s].reduce((a, b) => a + b, 0) / nSessions);
+  const sigmas = syms.map((s, idx) => {
+    const m = means[idx];
+    const v = returnsMap[s].reduce((acc, r) => acc + (r - m) * (r - m), 0) / Math.max(1, nSessions - 1);
+    return Math.max(1e-5, Math.sqrt(v));
+  });
+
+  const cov: number[][] = Array.from({ length: n }, () => Array(n).fill(0));
+  for (let i = 0; i < n; i++) {
+    for (let j = i; j < n; j++) {
+      let c = 0;
+      const ri = returnsMap[syms[i]];
+      const rj = returnsMap[syms[j]];
+      for (let t = 0; t < nSessions; t++) {
+        c += (ri[t] - means[i]) * (rj[t] - means[j]);
+      }
+      c /= Math.max(1, nSessions - 1);
+      cov[i][j] = c;
+      cov[j][i] = c;
+    }
+  }
+
+  let w = syms.map((_, i) => 1 / sigmas[i]);
+  w = projectSimplexWithCap(w, 0.45);
+
+  if (objective === "MIN_VAR" || objective === "TARGET_VAR") {
+    // Projected gradient descent on portfolio variance w^T Sigma w
+    for (let step = 0; step < 60; step++) {
+      const grad = syms.map((_, i) => {
+        let g = 0;
+        for (let j = 0; j < n; j++) g += 2 * cov[i][j] * w[j];
+        return g;
+      });
+      const stepSize = 250;
+      w = projectSimplexWithCap(
+        w.map((wi, i) => wi - stepSize * grad[i]),
+        0.45
+      );
+    }
+  }
+
+  // Soft-enforce sector weight cap across held equities
+  const secIndices: Record<string, number[]> = {};
+  syms.forEach((s, i) => {
+    const sec = vnSectorName(assetMap[s]?.sector);
+    secIndices[sec] = secIndices[sec] || [];
+    secIndices[sec].push(i);
+  });
+  Object.values(secIndices).forEach((idxs) => {
+    if (idxs.length < syms.length) {
+      const secSum = idxs.reduce((acc, i) => acc + w[i], 0);
+      if (secSum > sectorCap) {
+        const scale = sectorCap / secSum;
+        idxs.forEach((i) => {
+          w[i] *= scale;
+        });
+      }
+    }
+  });
+  const wSum = w.reduce((a, b) => a + b, 0);
+  w = w.map((x) => x / wSum);
+
+  // Determine target equity budget vs cash buffer
+  let targetEquityBudget = equityTotal;
+  if (objective === "TARGET_VAR") {
+    const pureEqPositions: Record<string, number> = {};
+    syms.forEach((s, i) => {
+      pureEqPositions[s] = Math.round(totalNav * w[i]);
+    });
+    const pureHealth = computeClientPortfolioHealth(pureEqPositions, 0, returnsMap, assetMap);
+    const pureVarPct = (pureHealth?.hist_var_95_pct || 0.025) * 100;
+    const scaleRatio = pureVarPct > targetVarPct ? Math.max(0.25, targetVarPct / pureVarPct) : 1.0;
+    targetEquityBudget = Math.round(totalNav * scaleRatio);
+  }
+
+  const trades: RebalanceTradeItem[] = [];
+  const projectedPositions: Record<string, number> = {};
+
+  syms.forEach((s, i) => {
+    const currVnd = positions[s];
+    const idealVnd = targetEquityBudget * w[i];
+    const price = assetMap[s]?.close_price || 0;
+    let deltaVnd = idealVnd - currVnd;
+    let deltaShares = price > 0 ? Math.round(deltaVnd / price) : 0;
+    // HOSE/HNX 100-share board lot rounding
+    const lots = price > 0 ? Math.round(deltaShares / 100) : 0;
+    if (price > 0) {
+      deltaShares = lots * 100;
+      deltaVnd = deltaShares * price;
+    }
+    const nextVnd = Math.max(0, Math.round(currVnd + deltaVnd));
+    projectedPositions[s] = nextVnd;
+
+    const action: "MUA" | "BÁN" | "GIỮ" =
+      Math.abs(deltaVnd) < 2_000_000 || (price > 0 && lots === 0) ? "GIỮ" : deltaVnd > 0 ? "MUA" : "BÁN";
+    trades.push({
+      symbol: s,
+      sector: vnSectorName(assetMap[s]?.sector),
+      action,
+      lots_100: Math.abs(lots),
+      delta_shares: deltaShares,
+      delta_vnd: Math.round(deltaVnd),
+      current_vnd: Math.round(currVnd),
+      target_vnd: nextVnd,
+      current_weight_pct: Number(((currVnd / Math.max(1, totalNav)) * 100).toFixed(1)),
+      target_weight_pct: Number(((nextVnd / Math.max(1, totalNav)) * 100).toFixed(1)),
+    });
+  });
+
+  const projectedEq = Object.values(projectedPositions).reduce((a, b) => a + b, 0);
+  const projectedCash = Math.max(0, Math.round(totalNav - projectedEq));
+  const after = computeClientPortfolioHealth(projectedPositions, projectedCash, returnsMap, assetMap);
+
+  const varBeforePct = Number((before.hist_var_95_pct * 100).toFixed(2));
+  const varAfterPct = Number(((after?.hist_var_95_pct ?? before.hist_var_95_pct) * 100).toFixed(2));
+  const hhiAfter = after?.hhi_stock ?? before.hhi_stock;
+
+  const objLabel =
+    objective === "MIN_VAR"
+      ? "Minimum Variance (Giảm phương sai tối đa)"
+      : objective === "RISK_PARITY"
+        ? "Risk Parity (Cân bằng đóng góp rủi ro 1/σ)"
+        : `Target VaR ≤ ${targetVarPct.toFixed(1)}%/ngày`;
+
+  return {
+    objective,
+    trades: trades.sort((a, b) => Math.abs(b.delta_vnd) - Math.abs(a.delta_vnd)),
+    var_before_pct: varBeforePct,
+    var_after_pct: varAfterPct,
+    hhi_before: before.hhi_stock,
+    hhi_after: hhiAfter,
+    recommended_cash_vnd: projectedCash,
+    projected_positions: projectedPositions,
+    projected_cash_vnd: projectedCash,
+    summary: `Chiến lược ${objLabel} (làm tròn lô 100 CP, trần ngành ≤ ${(sectorCap * 100).toFixed(0)}%): VaR 95% dự kiến từ ${varBeforePct}% → ${varAfterPct}%, HHI từ ${before.hhi_stock.toFixed(3)} → ${hhiAfter.toFixed(3)}.`,
+  };
+}
+
+export interface PortfolioLiquidationRow {
+  symbol: string;
+  position_vnd: number;
+  filled_vnd: number;
+  fill_pct: number;
+  slippage_pct: number;
+  fee_tax_pct: number;
+  estimated_loss_vnd: number;
+  sufficient_depth: boolean;
+}
+
+export interface PortfolioLiquidationSummary {
+  rows: PortfolioLiquidationRow[];
+  total_equity_vnd: number;
+  total_filled_vnd: number;
+  fill_coverage_pct: number;
+  weighted_slippage_pct: number;
+  weighted_fee_tax_pct: number;
+  total_estimated_loss_vnd: number;
+  unfilled_symbols: string[];
+}
+
+export function evaluatePortfolioLiquidation(
+  positions: Record<string, number>,
+  stockSeries: Record<string, StockSeriesItem>
+): PortfolioLiquidationSummary {
+  const rows: PortfolioLiquidationRow[] = [];
+  let totalEq = 0;
+  let totalFilled = 0;
+  let totalLossVnd = 0;
+  let weightedSlipNum = 0;
+  let weightedFeeNum = 0;
+  const unfilledSymbols: string[] = [];
+
+  Object.entries(positions)
+    .filter(([, val]) => val > 0)
+    .sort((a, b) => b[1] - a[1])
+    .forEach(([sym, val]) => {
+      const book = stockSeries[sym]?.orderbook;
+      totalEq += val;
+      if (!book || book.bid_prices.length === 0) {
+        unfilledSymbols.push(sym);
+        rows.push({
+          symbol: sym,
+          position_vnd: Math.round(val),
+          filled_vnd: 0,
+          fill_pct: 0,
+          slippage_pct: 0,
+          fee_tax_pct: 0.25,
+          estimated_loss_vnd: 0,
+          sufficient_depth: false,
+        });
+        return;
+      }
+      const ev = evaluateClientOrderBook(book, val, "sell");
+      const fillPct = val > 0 ? Number(((ev.filled_value_vnd / val) * 100).toFixed(1)) : 0;
+      const lossVnd = Math.round(ev.filled_value_vnd * ((ev.estimated_cost_pct + ev.fee_tax_pct) / 100));
+      totalFilled += ev.filled_value_vnd;
+      totalLossVnd += lossVnd;
+      weightedSlipNum += ev.filled_value_vnd * ev.estimated_cost_pct;
+      weightedFeeNum += ev.filled_value_vnd * ev.fee_tax_pct;
+      if (!ev.sufficient_depth) unfilledSymbols.push(sym);
+
+      rows.push({
+        symbol: sym,
+        position_vnd: Math.round(val),
+        filled_vnd: ev.filled_value_vnd,
+        fill_pct: fillPct,
+        slippage_pct: ev.estimated_cost_pct,
+        fee_tax_pct: ev.fee_tax_pct,
+        estimated_loss_vnd: lossVnd,
+        sufficient_depth: ev.sufficient_depth,
+      });
+    });
+
+  return {
+    rows,
+    total_equity_vnd: Math.round(totalEq),
+    total_filled_vnd: Math.round(totalFilled),
+    fill_coverage_pct: totalEq > 0 ? Number(((totalFilled / totalEq) * 100).toFixed(1)) : 0,
+    weighted_slippage_pct: totalFilled > 0 ? Number((weightedSlipNum / totalFilled).toFixed(3)) : 0,
+    weighted_fee_tax_pct: totalFilled > 0 ? Number((weightedFeeNum / totalFilled).toFixed(2)) : 0.25,
+    total_estimated_loss_vnd: Math.round(totalLossVnd),
+    unfilled_symbols: unfilledSymbols,
+  };
+}
+
+export interface ParsedPortfolioResult {
+  positions: Record<string, number>;
+  costBasis: Record<string, number>;
+  recognizedCount: number;
+  unrecognizedTokens: string[];
+}
+
+export function parseFlexiblePortfolioInput(
+  rawText: string,
+  assetMap: Record<string, AssetPriceLike>
+): ParsedPortfolioResult {
+  const positions: Record<string, number> = {};
+  const costBasis: Record<string, number> = {};
+  const unrecognizedTokens: string[] = [];
+
+  const lines = rawText
+    .split(/\r?\n/)
+    .map((l) => l.trim())
+    .filter(Boolean);
+
+  for (const line of lines) {
+    // Support CSV exported from SSI/VPS/TCBS/VNDirect or pasted text: "VCB 2000 58000" / "HPG, 5000" / "FPT 120tr"
+    const cols = line.split(/[,\t;|]+/).map((c) => c.trim()).filter(Boolean);
+    const tokens = cols.length >= 2 ? cols : line.split(/\s+/).filter(Boolean);
+    if (tokens.length < 2) continue;
+
+    // Skip header lines cleanly
+    const symCandidate = tokens[0].toUpperCase().replace(/[^A-Z0-9]/g, "");
+    if (!symCandidate || ["MÃ", "MA", "SYMBOL", "TICKER", "CP"].includes(symCandidate)) continue;
+
+    const info = assetMap[symCandidate];
+    if (!info) {
+      if (/^[A-Z0-9]{3,8}$/.test(symCandidate)) unrecognizedTokens.push(symCandidate);
+      continue;
+    }
+
+    const parseNumToken = (tok: string): number => {
+      const lower = tok.toLowerCase().trim();
+      const cleaned = lower.replace(/[,_\sđvnd]/g, "");
+      if (cleaned.endsWith("ty") || cleaned.endsWith("tỷ")) {
+        const v = Number(cleaned.replace(/t[yỷ]$/, ""));
+        return Number.isFinite(v) ? v * 1e9 : 0;
+      }
+      if (cleaned.endsWith("tr") || cleaned.endsWith("m")) {
+        const v = Number(cleaned.replace(/(tr|m)$/, ""));
+        return Number.isFinite(v) ? v * 1e6 : 0;
+      }
+      const num = Number(cleaned);
+      return Number.isFinite(num) ? num : 0;
+    };
+
+    const qtyOrVal = parseNumToken(tokens[1]);
+    if (qtyOrVal <= 0) continue;
+
+    // Heuristic: < 500,000 shares * close_price => interpret as share count unless explicitly tagged tr/ty
+    const hasMoneySuffix = /(tr|m|ty|tỷ|đ|vnd)$/i.test(tokens[1].trim());
+    const posVal = hasMoneySuffix || qtyOrVal >= 500_000 ? qtyOrVal : qtyOrVal * info.close_price;
+    positions[symCandidate] = Math.round((positions[symCandidate] || 0) + posVal);
+
+    if (tokens.length >= 3) {
+      const rawCost = parseNumToken(tokens[2]);
+      if (rawCost > 0) {
+        // Handle cost price entered in thousands (e.g. "28.5" meaning 28,500 VND) or full VND ("28500")
+        const unitCost = rawCost < 500 ? rawCost * 1000 : rawCost;
+        const shares = hasMoneySuffix || qtyOrVal >= 500_000 ? posVal / Math.max(1, info.close_price) : qtyOrVal;
+        costBasis[symCandidate] = Math.round(shares * unitCost);
+      }
+    }
+  }
+
+  return {
+    positions,
+    costBasis,
+    recognizedCount: Object.keys(positions).length,
+    unrecognizedTokens,
+  };
+}
+
+export function evaluateCustomFundamentalScore(input: CustomFundamentalInput): number | null {
+  const parts: Array<{ score: number; weight: number }> = [];
+  if (input.roe != null && Number.isFinite(input.roe)) {
+    // ROE: 5% -> 20 pts, 15% -> 60 pts, 25%+ -> 95 pts
+    const s = Math.max(0, Math.min(100, (input.roe / 25) * 90 + 5));
+    parts.push({ score: s, weight: 0.35 });
+  }
+  if (input.pe != null && Number.isFinite(input.pe) && input.pe > 0) {
+    // P/E: 6x -> 95 pts, 12x -> 70 pts, 20x -> 40 pts, 30x+ -> 15 pts
+    const s = Math.max(5, Math.min(100, 115 - input.pe * 3.5));
+    parts.push({ score: s, weight: 0.25 });
+  }
+  if (input.profitGrowth != null && Number.isFinite(input.profitGrowth)) {
+    // YoY Profit Growth: -20% -> 10 pts, 0% -> 40 pts, +25% -> 85 pts
+    const s = Math.max(0, Math.min(100, 40 + input.profitGrowth * 1.8));
+    parts.push({ score: s, weight: 0.25 });
+  }
+  if (input.pb != null && Number.isFinite(input.pb) && input.pb > 0) {
+    const s = Math.max(10, Math.min(100, 105 - input.pb * 20));
+    parts.push({ score: s, weight: 0.15 });
+  }
+  if (parts.length === 0) return null;
+  const wSum = parts.reduce((a, p) => a + p.weight, 0);
+  const total = parts.reduce((a, p) => a + p.score * (p.weight / wSum), 0);
+  return Number(total.toFixed(1));
+}
+
+export function recomputePorisWithFundamentals(
+  stock: DiscoveryStock,
+  customInput?: CustomFundamentalInput,
+  regime: "Positive" | "Neutral" | "Defensive" | "High Risk" = "Neutral"
+): { effectiveScore: number | null; effectiveFundamental: number | null } {
+  const fScore = customInput ? evaluateCustomFundamentalScore(customInput) : stock.fundamental_score;
+  const baseWeights =
+    regime === "High Risk"
+      ? { trend: 0.2, liquidity: 0.35, foreign: 0.2, fundamental: 0.25 }
+      : { trend: 0.35, liquidity: 0.25, foreign: 0.15, fundamental: 0.25 };
+
+  const comps: Array<{ val: number | null; w: number }> = [
+    { val: stock.trend_score, w: baseWeights.trend },
+    { val: stock.liquidity_score, w: baseWeights.liquidity },
+    { val: stock.foreign_score, w: baseWeights.foreign },
+    { val: fScore, w: baseWeights.fundamental },
+  ];
+  const valid = comps.filter((c) => c.val != null) as Array<{ val: number; w: number }>;
+  if (valid.length === 0) return { effectiveScore: stock.alpha_score, effectiveFundamental: fScore };
+  const wTotal = valid.reduce((a, c) => a + c.w, 0);
+  const score = valid.reduce((a, c) => a + c.val * (c.w / wTotal), 0);
+  return {
+    effectiveScore: Number(score.toFixed(1)),
+    effectiveFundamental: fScore,
   };
 }

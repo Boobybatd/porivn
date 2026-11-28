@@ -184,3 +184,47 @@ def test_neo_intraday_overlay():
     assert float(c2.loc["2026-11-30", "VNINDEX"]) == 1665.5
     assert float(c2.loc["2026-11-30", "HPG"]) == 20300.0
     assert float(v2.loc["2026-11-30", "HPG"]) == 6e6
+
+
+def test_sector_neutral_and_regime_adaptive_scores():
+    df = pd.DataFrame(
+        [
+            {"symbol": "B1", "sector": "Bank", "rs_20d": 0.15, "above_ma20": 1, "adv_20_val": 400e9, "volume_pace": 1.4, "obi_3l": 0.2, "foreign_net_ratio": 0.05},
+            {"symbol": "B2", "sector": "Bank", "rs_20d": 0.05, "above_ma20": 0, "adv_20_val": 200e9, "volume_pace": 0.9, "obi_3l": -0.1, "foreign_net_ratio": -0.02},
+            {"symbol": "T1", "sector": "Tech", "rs_20d": 0.08, "above_ma20": 1, "adv_20_val": 300e9, "volume_pace": 1.2, "obi_3l": 0.1, "foreign_net_ratio": 0.04},
+        ]
+    )
+    scored_pos = compute_alpha_scores(df, regime="Positive")
+    scored_risk = compute_alpha_scores(df, regime="High Risk")
+    assert "alpha_sector_neutral" in scored_pos.columns
+    assert "alpha_regime_adaptive" in scored_pos.columns
+    assert scored_pos["alpha_sector_neutral"].notna().all()
+    # In High Risk, trend weight drops and liquidity/foreign take higher share
+    b2_pos = float(scored_pos[scored_pos["symbol"] == "B2"].iloc[0]["alpha_regime_adaptive"])
+    b2_risk = float(scored_risk[scored_risk["symbol"] == "B2"].iloc[0]["alpha_regime_adaptive"])
+    assert b2_pos != b2_risk
+
+
+def test_rebalance_backtest():
+    from src.finance.validation import evaluate_portfolio_rebalance_backtest
+
+    dates = pd.date_range("2026-01-01", periods=60, freq="B").strftime("%Y-%m-%d")
+    prices = pd.DataFrame(
+        {
+            "VNINDEX": np.linspace(1200, 1260, 60),
+            "FPT": np.linspace(100_000, 125_000, 60),
+            "VCB": np.linspace(60_000, 66_000, 60),
+        },
+        index=dates,
+    )
+    picks = {dates[5]: ["FPT", "VCB"], dates[25]: ["FPT", "VCB"]}
+    regimes = {dates[5]: "Positive", dates[25]: "High Risk"}
+    res = evaluate_portfolio_rebalance_backtest(
+        prices_df=prices,
+        rebalance_picks=picks,
+        regime_by_date=regimes,
+        rebalance_every_n=20,
+    )
+    assert res["rebalance_days"] == 20
+    assert len(res["equity_curve"]) > 10
+    assert res["total_return_pct"] > 0

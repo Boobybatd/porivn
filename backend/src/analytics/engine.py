@@ -4,13 +4,17 @@ from typing import Any, Dict, List, Optional
 import numpy as np
 import pandas as pd
 
-from src.data.db import DEFAULT_DB_PATH, ROOT_DIR, get_connection, now_vn_iso
-from src.data.ssi_client import load_universe
+from src.data.db import DEFAULT_DB_PATH, ROOT_DIR, get_connection, load_all_stock_events, now_vn_iso
+from src.data.ssi_client import load_extended_sector_map, load_universe
 from src.finance.discovery import compute_alpha_scores
 from src.finance.orderbook import estimate_execution_cost
 from src.finance.portfolio import analyze_portfolio_health, simulate_what_if_addition
 from src.finance.regime import classify_market_regime
-from src.finance.validation import backtest_historical_var, evaluate_signal_forward_returns
+from src.finance.validation import (
+    backtest_historical_var,
+    evaluate_portfolio_rebalance_backtest,
+    evaluate_signal_forward_returns,
+)
 
 
 def hose_tick_size(price_vnd: float) -> float:
@@ -188,8 +192,9 @@ def build_discovery_table(
     values: pd.DataFrame,
     sector_map: Dict[str, str],
     neo_stocks: Optional[Dict[str, Dict[str, Any]]] = None,
+    regime: str = "Neutral",
 ) -> pd.DataFrame:
-    """Compute Alpha Score features across the 55-stock Discovery Universe."""
+    """Compute Alpha / PORI Score features across the 55-stock Discovery Universe."""
     neo_stocks = neo_stocks or {}
     rows: List[Dict[str, Any]] = []
     idx_ret_20 = (
@@ -264,7 +269,7 @@ def build_discovery_table(
         )
 
     feat_df = pd.DataFrame(rows)
-    return compute_alpha_scores(feat_df)
+    return compute_alpha_scores(feat_df, regime=regime)
 
 
 def run_historical_signal_backtest(
@@ -274,35 +279,102 @@ def run_historical_signal_backtest(
     sector_map: Dict[str, str],
     sample_every_n_days: int = 5,
     top_k: int = 5,
-) -> List[Dict[str, Any]]:
-    """Backtest Top-K Alpha Score signals over historical dates (no look-ahead bias)."""
+) -> Dict[str, Any]:
+    """
+    Out-of-sample Backtesting (No Look-Ahead Bias):
+    1. Overall T+3/5/10 Signal Validation
+    2. Regime-Segmented Signal Validation (Favorable/Neutral vs Defensive/High Risk)
+    3. Weekly & Monthly Rebalanced Top-5 Strategy with Regime Cash Filter vs VNINDEX
+    """
     dates = list(closes.index)
     if len(dates) < 60:
-        return []
+        return {"overall": [], "by_regime": {}, "rebalance": {}}
 
-    signal_rows: List[Dict[str, Any]] = []
-    for idx in range(30, len(dates) - 15, sample_every_n_days):
+    universe_syms = [s for s in sector_map.keys() if s in closes.columns]
+    vni_ser = closes["VNINDEX"].dropna()
+    vni_vol_ser = volumes["VNINDEX"].dropna() if "VNINDEX" in volumes.columns else pd.Series(dtype=float)
+
+    favorable_rows: List[Dict[str, Any]] = []
+    risky_rows: List[Dict[str, Any]] = []
+    all_rows: List[Dict[str, Any]] = []
+    weekly_picks: Dict[str, List[str]] = {}
+    monthly_picks: Dict[str, List[str]] = {}
+    regime_by_date: Dict[str, str] = {}
+
+    for step_num, idx in enumerate(range(50, len(dates) - 5, sample_every_n_days)):
+        dt_str = str(dates[idx])
         sub_c = closes.iloc[: idx + 1]
         sub_v = volumes.iloc[: idx + 1]
         sub_val = values.iloc[: idx + 1]
-        scored = build_discovery_table(sub_c, sub_v, sub_val, sector_map)
-        top_syms = scored.dropna(subset=["alpha_score"]).head(top_k)["symbol"].tolist()
-        for sym in top_syms:
-            signal_rows.append({"signal_date": dates[idx], "symbol": sym})
+        vni_sub = sub_c["VNINDEX"].dropna()
+        if len(vni_sub) < 50:
+            continue
 
-    sig_df = pd.DataFrame(signal_rows)
-    summaries = evaluate_signal_forward_returns(sig_df, closes, horizons=[3, 5, 10])
-    return [
-        {
-            "horizon_days": s.horizon_days,
-            "sample_count": s.sample_count,
-            "avg_excess_return_pct": round(s.avg_excess_return * 100.0, 2),
-            "median_excess_return_pct": round(s.median_excess_return * 100.0, 2),
-            "win_rate_pct": round(s.win_rate * 100.0, 1),
-            "note": s.note,
-        }
-        for s in summaries
-    ]
+        # Classify Market Regime at historical date idx without look-ahead
+        latest_row = sub_c.iloc[-1]
+        prev_row = sub_c.iloc[-2]
+        adv = int((latest_row[universe_syms] > prev_row[universe_syms]).sum())
+        dec = int((latest_row[universe_syms] < prev_row[universe_syms]).sum())
+        ma20_row = sub_c[universe_syms].tail(20).mean()
+        pct_abv = float((latest_row[universe_syms] > ma20_row).mean())
+        vol_p = (
+            float(vni_vol_ser.iloc[idx] / vni_vol_ser.iloc[max(0, idx - 19) : idx + 1].mean())
+            if idx < len(vni_vol_ser) and vni_vol_ser.iloc[max(0, idx - 19) : idx + 1].mean() > 0
+            else 1.0
+        )
+        reg = classify_market_regime(
+            index_closes=vni_sub,
+            advances=adv,
+            declines=dec,
+            pct_above_ma20=pct_abv,
+            volume_pace=vol_p,
+            foreign_net_value=0.0,
+        )
+        regime_by_date[dt_str] = reg.regime
+
+        scored = build_discovery_table(sub_c, sub_v, sub_val, sector_map, regime=reg.regime)
+        use_col = "alpha_regime_adaptive" if "alpha_regime_adaptive" in scored.columns else "alpha_score"
+        top_syms = scored.dropna(subset=[use_col]).sort_values(by=use_col, ascending=False).head(top_k)["symbol"].tolist()
+
+        weekly_picks[dt_str] = top_syms
+        if step_num % 4 == 0:
+            monthly_picks[dt_str] = top_syms
+
+        for sym in top_syms:
+            rec = {"signal_date": dt_str, "symbol": sym}
+            all_rows.append(rec)
+            if reg.consensus_score >= 1:
+                favorable_rows.append(rec)
+            else:
+                risky_rows.append(rec)
+
+    def _fmt_summaries(rows_list: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        if not rows_list:
+            return []
+        sums = evaluate_signal_forward_returns(pd.DataFrame(rows_list), closes, horizons=[3, 5, 10])
+        return [
+            {
+                "horizon_days": s.horizon_days,
+                "sample_count": s.sample_count,
+                "avg_excess_return_pct": round(s.avg_excess_return * 100.0, 2),
+                "median_excess_return_pct": round(s.median_excess_return * 100.0, 2),
+                "win_rate_pct": round(s.win_rate * 100.0, 1),
+                "note": s.note,
+            }
+            for s in sums
+        ]
+
+    return {
+        "overall": _fmt_summaries(all_rows),
+        "by_regime": {
+            "favorable": _fmt_summaries(favorable_rows),
+            "risky": _fmt_summaries(risky_rows),
+        },
+        "rebalance": {
+            "weekly": evaluate_portfolio_rebalance_backtest(closes, weekly_picks, regime_by_date, rebalance_every_n=5),
+            "monthly": evaluate_portfolio_rebalance_backtest(closes, monthly_picks, regime_by_date, rebalance_every_n=20),
+        },
+    }
 
 
 def build_full_snapshot_bundle(
@@ -379,8 +451,22 @@ def build_full_snapshot_bundle(
         for dt in vni_c.tail(90).index
     ]
 
-    discovery_df = build_discovery_table(closes, volumes, values, sector_map, neo_stocks)
+    discovery_df = build_discovery_table(closes, volumes, values, sector_map, neo_stocks, regime=regime.regime)
+    events_map = load_all_stock_events(db_path)
     discovery_records = discovery_df.replace({np.nan: None}).to_dict(orient="records")
+    for rec in discovery_records:
+        sym = rec["symbol"]
+        ev_info = events_map.get(sym, {})
+        ev_list = (ev_info.get("events") or [])[:4]
+        listed = ev_info.get("listed_shares")
+        rec["events"] = ev_list
+        rec["has_event_risk"] = len(ev_list) > 0
+        rec["listed_shares"] = listed
+        rec["market_cap_vnd"] = (
+            round(float(rec["close_price"]) * float(listed), 0)
+            if listed and rec.get("close_price")
+            else None
+        )
 
     # Sector summary (average alpha score, breadth, top stock per sector)
     sector_summary: List[Dict[str, Any]] = []
@@ -462,8 +548,45 @@ def build_full_snapshot_bundle(
             "orderbook": ob_book,
         }
 
+    # Extended Assets (ETFs, HNX, UPCoM) for Portfolio Diversification & VaR Coverage
+    ext_map = load_extended_sector_map()
+    extended_assets: List[Dict[str, Any]] = []
+    for ext_sym, ext_sec in ext_map.items():
+        if ext_sym not in closes.columns:
+            continue
+        c_ser = closes[ext_sym].dropna()
+        v_ser = volumes[ext_sym].dropna()
+        val_ser = values[ext_sym].dropna()
+        if len(c_ser) < 25:
+            continue
+        last_ext_c = float(c_ser.iloc[-1])
+        est_val = val_ser.where(val_ser > 0, c_ser * v_ser)
+        adv20_v = float(est_val.tail(20).mean())
+        adv20_vol = float(v_ser.tail(20).mean())
+        pct_1d = round((last_ext_c / float(c_ser.iloc[-2]) - 1.0) * 100.0, 2)
+        returns_matrix[ext_sym] = [round(float(x), 5) for x in ret_tail[ext_sym].fillna(0.0).tolist()]
+        c_tail = c_ser.tail(60)
+        m20_tail = c_ser.rolling(20).mean().tail(60)
+        ob_book = build_orderbook_snapshot_for_symbol(ext_sym, last_ext_c, adv20_vol, 0.0, neo_stocks.get(ext_sym))
+        stock_series[ext_sym] = {
+            "dates_60d": [str(d) for d in c_tail.index],
+            "closes_60d": [round(float(x), 0) for x in c_tail.tolist()],
+            "ma20_60d": [round(float(x), 0) if pd.notna(x) else None for x in m20_tail.tolist()],
+            "orderbook": ob_book,
+        }
+        extended_assets.append(
+            {
+                "symbol": ext_sym,
+                "sector": ext_sec,
+                "close_price": round(last_ext_c, 0),
+                "pct_change_1d": pct_1d,
+                "adv_20_val": round(adv20_v, 0),
+                "adv_20_vol": round(adv20_vol, 0),
+            }
+        )
+
     # Validation Hub
-    signal_val = run_historical_signal_backtest(closes, volumes, values, sector_map)
+    bt_bundle = run_historical_signal_backtest(closes, volumes, values, sector_map)
     port_syms = [s for s in positions if s in returns_df.columns]
     w_vec = np.array([positions[s] / health.total_nav_vnd for s in port_syms])
     port_ret = pd.Series(returns_df[port_syms].dropna().to_numpy() @ w_vec)
@@ -480,6 +603,7 @@ def build_full_snapshot_bundle(
         "vnindex_history": vnindex_history,
         "sector_summary": sector_summary,
         "discovery": discovery_records,
+        "extended_assets": extended_assets,
         "default_portfolio": {
             "positions": positions,
             "cash_vnd": default_cash_vnd,
@@ -492,7 +616,9 @@ def build_full_snapshot_bundle(
             "stock_series": stock_series,
         },
         "validation": {
-            "signal_validation": signal_val,
+            "signal_validation": bt_bundle["overall"],
+            "signal_by_regime": bt_bundle["by_regime"],
+            "rebalance_backtest": bt_bundle["rebalance"],
             "risk_model_validation": var_bt.__dict__,
         },
         "disclaimer": (

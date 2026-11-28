@@ -21,19 +21,47 @@ def winsorize_and_percentile(series: pd.Series, higher_is_better: bool = True) -
     return pct.where(series.notna(), np.nan)
 
 
+def _aggregate_weighted_scores(
+    df: pd.DataFrame,
+    comp_map: Dict[str, str],
+    w: Dict[str, float],
+    min_completeness: float,
+) -> tuple[List[Optional[float]], List[float], List[str]]:
+    alpha_vals: List[Optional[float]] = []
+    completeness_vals: List[float] = []
+    flags: List[str] = []
+    for _, row in df.iterrows():
+        avail_weight = 0.0
+        weighted_sum = 0.0
+        missing_names = []
+        for key, col in comp_map.items():
+            val = row[col]
+            if pd.notna(val):
+                avail_weight += w[key]
+                weighted_sum += w[key] * float(val)
+            else:
+                missing_names.append(key)
+
+        completeness_vals.append(round(avail_weight, 2))
+        if avail_weight < min_completeness or avail_weight <= 0:
+            alpha_vals.append(np.nan)
+            flags.append(f"Thiếu dữ liệu ({', '.join(missing_names)}) - Không xếp hạng")
+        else:
+            alpha_vals.append(round(weighted_sum / avail_weight, 1))
+            flags.append(f"Thiếu: {', '.join(missing_names)}" if missing_names else "Đầy đủ")
+    return alpha_vals, completeness_vals, flags
+
+
 def compute_alpha_scores(
     features_df: pd.DataFrame,
     weights: Optional[Dict[str, float]] = None,
     min_completeness: float = 0.60,
+    regime: str = "Neutral",
 ) -> pd.DataFrame:
     """
-    Compute 4-component Alpha Score (0-100) for Discovery Universe.
-    Expected input columns:
-      symbol, sector, rs_20d, above_ma20 (0/1), adv_20_val, volume_pace,
-      spread_pct (optional), obi_3l (optional), foreign_net_ratio (optional),
-      roe (optional), profit_growth (optional), pe (optional)
-    Missing fundamental data is flagged and weights are renormalized across valid components
-    instead of assigning 0.
+    Compute 4-component PORI / Alpha Score (0-100) for Discovery Universe, plus:
+    - alpha_sector_neutral: peer-relative percentile within each sector
+    - alpha_regime_adaptive: lowers short-term momentum weight in High Risk/Defensive markets
     """
     w = weights or {
         "trend": 0.35,
@@ -48,6 +76,19 @@ def compute_alpha_scores(
     ma_bonus = df["above_ma20"].astype(float) * 100.0
     df["trend_score"] = (0.75 * rs_score + 0.25 * ma_bonus).round(1)
 
+    # Sector-neutral trend & liquidity within each sector
+    if "sector" in df.columns and df["sector"].nunique() > 1:
+        sec_rs = df.groupby("sector")["rs_20d"].transform(
+            lambda s: winsorize_and_percentile(s, higher_is_better=True)
+        )
+        df["_trend_sec"] = (0.75 * sec_rs + 0.25 * ma_bonus).round(1)
+        sec_adv = df.groupby("sector")["adv_20_val"].transform(
+            lambda s: winsorize_and_percentile(s, higher_is_better=True)
+        )
+    else:
+        df["_trend_sec"] = df["trend_score"]
+        sec_adv = winsorize_and_percentile(df["adv_20_val"], higher_is_better=True)
+
     # 2. Liquidity & Trading Quality (OBI kept small <= 20% of liquidity pillar)
     adv_score = winsorize_and_percentile(df["adv_20_val"], higher_is_better=True)
     pace_score = winsorize_and_percentile(df["volume_pace"], higher_is_better=True)
@@ -58,8 +99,14 @@ def compute_alpha_scores(
             + 0.30 * pace_score.fillna(50.0)
             + 0.20 * obi_score.fillna(50.0)
         ).round(1)
+        df["_liq_sec"] = (
+            0.50 * sec_adv.fillna(50.0)
+            + 0.30 * pace_score.fillna(50.0)
+            + 0.20 * obi_score.fillna(50.0)
+        ).round(1)
     else:
         df["liquidity_score"] = (0.60 * adv_score + 0.40 * pace_score).round(1)
+        df["_liq_sec"] = (0.60 * sec_adv + 0.40 * pace_score).round(1)
 
     # 3. Foreign Flow
     if "foreign_net_ratio" in df.columns and df["foreign_net_ratio"].notna().any():
@@ -83,54 +130,49 @@ def compute_alpha_scores(
     else:
         df["fundamental_score"] = np.nan
 
-    # Renormalize weights per row across available components & track data completeness
     comp_map = {
         "trend": "trend_score",
         "liquidity": "liquidity_score",
         "foreign": "foreign_score",
         "fundamental": "fundamental_score",
     }
+    alpha_vals, completeness_vals, flags = _aggregate_weighted_scores(df, comp_map, w, min_completeness)
 
-    alpha_vals: List[Optional[float]] = []
-    completeness_vals: List[float] = []
-    flags: List[str] = []
+    sec_comp_map = {
+        "trend": "_trend_sec",
+        "liquidity": "_liq_sec",
+        "foreign": "foreign_score",
+        "fundamental": "fundamental_score",
+    }
+    sec_alpha_vals, _, _ = _aggregate_weighted_scores(df, sec_comp_map, w, min_completeness)
+
+    # Regime-adaptive weights: when High Risk / Defensive, trim momentum chase from 0.35 -> 0.15
+    if regime in ("High Risk", "Defensive"):
+        w_adapt = {"trend": 0.15, "liquidity": 0.40, "foreign": 0.20, "fundamental": 0.25}
+    else:
+        w_adapt = w
+    adapt_alpha_vals, _, _ = _aggregate_weighted_scores(df, comp_map, w_adapt, min_completeness)
+
     reasons_list: List[List[str]] = []
-
     for _, row in df.iterrows():
-        avail_weight = 0.0
-        weighted_sum = 0.0
-        missing_names = []
-        for key, col in comp_map.items():
-            val = row[col]
-            if pd.notna(val):
-                avail_weight += w[key]
-                weighted_sum += w[key] * float(val)
-            else:
-                missing_names.append(key)
-
-        completeness_vals.append(round(avail_weight, 2))
-        if avail_weight < min_completeness or avail_weight <= 0:
-            alpha_vals.append(np.nan)
-            flags.append(f"Thiếu dữ liệu ({', '.join(missing_names)}) - Không xếp hạng")
-        else:
-            alpha_vals.append(round(weighted_sum / avail_weight, 1))
-            flags.append(f"Thiếu: {', '.join(missing_names)}" if missing_names else "Đầy đủ")
-
         reasons: List[str] = []
         if pd.notna(row["trend_score"]) and row["trend_score"] >= 70:
-            reasons.append(f"Động lượng giá mạnh (Trend {row['trend_score']:.0f}/100)")
+            reasons.append(f"Động lượng giá mạnh (Xu hướng {row['trend_score']:.0f}/100)")
         if pd.notna(row["liquidity_score"]) and row["liquidity_score"] >= 70:
-            reasons.append(f"Thanh khoản tích cực (Liquidity {row['liquidity_score']:.0f}/100)")
+            reasons.append(f"Thanh khoản tích cực (Thanh khoản {row['liquidity_score']:.0f}/100)")
         if pd.notna(row["foreign_score"]) and row["foreign_score"] >= 70:
-            reasons.append(f"Khối ngoại hỗ trợ (Foreign {row['foreign_score']:.0f}/100)")
+            reasons.append(f"Khối ngoại hỗ trợ (Khối ngoại {row['foreign_score']:.0f}/100)")
         if pd.notna(row["fundamental_score"]) and row["fundamental_score"] >= 70:
-            reasons.append(f"Nền tảng cơ bản tốt (Fundamental {row['fundamental_score']:.0f}/100)")
+            reasons.append(f"Nền tảng cơ bản tốt (Cơ bản {row['fundamental_score']:.0f}/100)")
         if not reasons:
             reasons.append("Cân bằng ở mức trung bình khá trên các yếu tố khả dụng")
         reasons_list.append(reasons)
 
     df["alpha_score"] = alpha_vals
+    df["alpha_sector_neutral"] = sec_alpha_vals
+    df["alpha_regime_adaptive"] = adapt_alpha_vals
     df["data_completeness"] = completeness_vals
     df["data_flag"] = flags
     df["reasons"] = reasons_list
+    df = df.drop(columns=["_trend_sec", "_liq_sec"], errors="ignore")
     return df.sort_values(by="alpha_score", ascending=False, na_position="last").reset_index(drop=True)

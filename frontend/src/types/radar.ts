@@ -33,6 +33,20 @@ export interface SectorSummaryItem {
   top_score: number;
 }
 
+export interface StockEventItem {
+  date?: string;
+  title?: string;
+  type?: string;
+}
+
+export interface CustomFundamentalInput {
+  pe?: number;
+  pb?: number;
+  roe?: number; // % e.g. 22.5
+  profitGrowth?: number; // % YoY e.g. 18.0
+  debtToEquity?: number; // ratio e.g. 0.8
+}
+
 export interface DiscoveryStock {
   symbol: string;
   sector: string;
@@ -52,6 +66,8 @@ export interface DiscoveryStock {
   spread_pct?: number | null;
   foreign_net_ratio: number | null;
   alpha_score: number | null;
+  alpha_sector_neutral?: number | null;
+  alpha_regime_adaptive?: number | null;
   trend_score: number | null;
   liquidity_score: number | null;
   foreign_score: number | null;
@@ -59,6 +75,25 @@ export interface DiscoveryStock {
   data_completeness: number;
   data_flag: string;
   reasons: string[];
+  events?: StockEventItem[];
+  has_event_risk?: boolean;
+  listed_shares?: number | null;
+  market_cap_vnd?: number | null;
+}
+
+export interface ExtendedAsset {
+  symbol: string;
+  sector: string;
+  close_price: number;
+  pct_change_1d: number;
+  adv_20_val: number;
+  adv_20_vol: number;
+}
+
+export interface EquityCurvePoint {
+  date: string;
+  portfolio: number;
+  vnindex: number;
 }
 
 export interface PortfolioHealth {
@@ -76,6 +111,15 @@ export interface PortfolioHealth {
   hist_es_95_vnd: number;
   param_var_95_pct: number;
   annualized_vol_pct: number;
+  annualized_return_pct?: number;
+  sharpe_ratio?: number;
+  sortino_ratio?: number;
+  max_drawdown_pct?: number;
+  win_days_pct?: number;
+  cost_basis_total_vnd?: number;
+  unrealized_pnl_vnd?: number;
+  unrealized_pnl_pct?: number;
+  equity_curve?: EquityCurvePoint[];
   health_score: number;
   sector_weights: Record<string, number>;
   correlation_matrix: Record<string, Record<string, number>>;
@@ -144,6 +188,7 @@ export interface SnapshotBundle {
   vnindex_history?: VnindexPoint[];
   sector_summary?: SectorSummaryItem[];
   discovery: DiscoveryStock[];
+  extended_assets?: ExtendedAsset[];
   default_portfolio: {
     positions: Record<string, number>;
     cash_vnd: number;
@@ -165,6 +210,44 @@ export interface SnapshotBundle {
       win_rate_pct: number;
       note: string;
     }>;
+    signal_by_regime?: {
+      favorable: Array<{
+        horizon_days: number;
+        sample_count: number;
+        avg_excess_return_pct: number;
+        median_excess_return_pct: number;
+        win_rate_pct: number;
+        note: string;
+      }>;
+      risky: Array<{
+        horizon_days: number;
+        sample_count: number;
+        avg_excess_return_pct: number;
+        median_excess_return_pct: number;
+        win_rate_pct: number;
+        note: string;
+      }>;
+    };
+    rebalance_backtest?: {
+      weekly?: {
+        rebalance_days: number;
+        total_return_pct: number;
+        vnindex_return_pct: number;
+        sharpe_ratio: number;
+        max_drawdown_pct: number;
+        vnindex_mdd_pct: number;
+        equity_curve: Array<{ date: string; strategy: number; vnindex: number }>;
+      };
+      monthly?: {
+        rebalance_days: number;
+        total_return_pct: number;
+        vnindex_return_pct: number;
+        sharpe_ratio: number;
+        max_drawdown_pct: number;
+        vnindex_mdd_pct: number;
+        equity_curve: Array<{ date: string; strategy: number; vnindex: number }>;
+      };
+    };
     risk_model_validation: {
       window_days: number;
       test_days: number;

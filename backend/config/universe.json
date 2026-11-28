@@ -1,5 +1,5 @@
 {
-  "description": "Rổ cổ phiếu tầm soát: 55 mã thanh khoản cao đa ngành trên HOSE",
+  "description": "Rổ cổ phiếu tầm soát chuẩn: 55 mã thanh khoản cao đa ngành trên HOSE + danh mục tài sản mở rộng (ETF, HNX, UPCoM)",
   "indices": ["VNINDEX", "VN30"],
   "sectors": {
     "Ngân hàng": ["VCB", "BID", "CTG", "TCB", "MBB", "VPB", "ACB", "STB", "HDB", "TPB", "VIB", "LPB"],
@@ -10,5 +10,10 @@
     "Công nghệ & Viễn thông": ["FPT", "CMG"],
     "Dầu khí & Năng lượng": ["GAS", "PVD", "PVS", "PLX", "POW", "REE", "PC1"],
     "Công nghiệp & Cảng biển": ["GMD", "HAH", "VJC", "VTP", "CTD"]
+  },
+  "extended_assets": {
+    "Quỹ ETF": ["E1VFVN30", "FUEVFVND", "FUESSVFL"],
+    "Sàn HNX": ["SHS", "IDC", "PVI", "CEO"],
+    "Sàn UPCoM": ["BSR", "ACV", "VEA", "QNS", "MCH"]
   }
 }

@@ -14,6 +14,8 @@ export const supabase: SupabaseClient | null = isSupabaseConfigured
     })
   : null;
 
+import type { CustomFundamentalInput } from "@/types/radar";
+
 export interface SimulationHistoryItem {
   id: string;
   createdAt: string;
@@ -28,7 +30,21 @@ export interface UserWorkspacePayload {
   cashVnd: number;
   targetCapitalVnd: number;
   simulations: SimulationHistoryItem[];
+  watchlist?: string[];
+  costBasis?: Record<string, number>;
+  customFundamentals?: Record<string, CustomFundamentalInput>;
+  alertVarPct?: number;
   updatedAt?: string;
+}
+
+const META_SIM_ID = "__PORI_META__";
+
+interface StoredMetaItem {
+  id: typeof META_SIM_ID;
+  watchlist?: string[];
+  costBasis?: Record<string, number>;
+  customFundamentals?: Record<string, CustomFundamentalInput>;
+  alertVarPct?: number;
 }
 
 export async function loadCloudWorkspace(userId: string): Promise<UserWorkspacePayload | null> {
@@ -40,11 +56,19 @@ export async function loadCloudWorkspace(userId: string): Promise<UserWorkspaceP
     .maybeSingle();
 
   if (error || !data) return null;
+  const rawSims = Array.isArray(data.simulations) ? (data.simulations as Array<SimulationHistoryItem | StoredMetaItem>) : [];
+  const metaEntry = rawSims.find((x) => x && x.id === META_SIM_ID) as StoredMetaItem | undefined;
+  const cleanSims = rawSims.filter((x) => x && x.id !== META_SIM_ID) as SimulationHistoryItem[];
+
   return {
     positions: (data.positions as Record<string, number>) || {},
     cashVnd: Number(data.cash_vnd ?? 100_000_000),
     targetCapitalVnd: Number(data.target_capital_vnd ?? 200_000_000),
-    simulations: Array.isArray(data.simulations) ? (data.simulations as SimulationHistoryItem[]) : [],
+    simulations: cleanSims,
+    watchlist: metaEntry?.watchlist,
+    costBasis: metaEntry?.costBasis,
+    customFundamentals: metaEntry?.customFundamentals,
+    alertVarPct: metaEntry?.alertVarPct,
     updatedAt: data.updated_at,
   };
 }
@@ -55,6 +79,15 @@ export async function saveCloudWorkspace(
   payload: UserWorkspacePayload
 ): Promise<{ ok: boolean; error?: string }> {
   if (!supabase) return { ok: false, error: "Chưa cấu hình Supabase." };
+  const metaEntry: StoredMetaItem = {
+    id: META_SIM_ID,
+    watchlist: payload.watchlist || [],
+    costBasis: payload.costBasis || {},
+    customFundamentals: payload.customFundamentals || {},
+    alertVarPct: payload.alertVarPct ?? 2.5,
+  };
+  const packedSims = [...payload.simulations.filter((x) => x.id !== META_SIM_ID).slice(0, 29), metaEntry];
+
   const { error } = await supabase.from("pori_user_workspaces").upsert(
     {
       user_id: userId,
@@ -62,7 +95,7 @@ export async function saveCloudWorkspace(
       positions: payload.positions,
       cash_vnd: Math.round(payload.cashVnd),
       target_capital_vnd: Math.round(payload.targetCapitalVnd),
-      simulations: payload.simulations.slice(0, 30),
+      simulations: packedSims,
       updated_at: new Date().toISOString(),
     },
     { onConflict: "user_id" }
